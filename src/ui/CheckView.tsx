@@ -4,7 +4,7 @@ import {
   amountIndex, closeCheck, groupById, groupName, retryWith, settingsSummary, startCheck, stopCheck, useAppState,
   type CheckRow, type RowStatus,
 } from '../state/store';
-import { diffPhrase, formatMoney, locationShort, madeOfLabel, plural, ROUNDING_SHORT } from '../lib/format';
+import { diffPhrase, formatMoney, locationShort, madeOfPhrase, plural, ROUNDING_SHORT } from '../lib/format';
 import { download, exportCsv, exportXlsx, type ExportRow } from '../lib/exporter';
 import type { Match } from '../types';
 import { GroupTag } from './common';
@@ -241,7 +241,7 @@ function Detail({ row, onShow, runSettings }: { row: CheckRow; onShow: (id: stri
 
       {row.status === 'notfound' && (
         <>
-          <p>Nothing in {groupName(s, runSettings.againstGroupId)} makes {formatMoney(amount.value, amount.decimals)} using {madeOfLabel(st.maxCount)} {st.maxCount === 1 ? '' : 'numbers'}, {ROUNDING_SHORT[st.rounding]}.</p>
+          <p>Nothing in {groupName(s, runSettings.againstGroupId)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount)}, {ROUNDING_SHORT[st.rounding]}.</p>
           {row.nearest && (() => {
             const n = idx.get(row.nearest.id);
             return n ? (

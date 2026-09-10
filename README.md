@@ -2,8 +2,8 @@
 
 Find where the numbers in your tax documents come from. Drop in PDFs, Excel workbooks, and CSV files, then ask:
 
-- **Where does this number appear?** — like XLOOKUP across every file (*match with 1 number*).
-- **Which numbers add up to it?** — up to 2, up to 3, or any count, optionally letting some count as negative (a penalty that reduces interest, a credit shown as a positive).
+- **Where does this number appear?** — like XLOOKUP across every file (*Match: 1 number*).
+- **Which numbers add up to it?** — sums of up to however many numbers you choose, or any sum, optionally letting some count as negative (a penalty that reduces interest, a credit shown as a positive).
 - **Does my return tie out?** — *Check a group* traces every number in one group of files (your return) against another (your source documents) and lists what's found, what's made of several numbers, and what's missing — with the nearest number for anything missing, which is usually the typo.
 
 ## Open it
@@ -21,7 +21,7 @@ Between sessions it remembers your **setup** — group names, which file names b
 1. **Files.** Drop files anywhere on the page, or use *Choose files*. Each file shows how many numbers were found. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
 3. **Find a number.** Type it (or click any number in a preview), pick the group, and choose:
-   - **Match with** 1 number, up to 2, up to 3, or any.
+   - **Match:** *1 number* (where does it appear?), *Sums of up to N* (set N from 2 to 20), or *Any sum*. Exact matches of the number itself always show first.
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
    - **Also try negatives:** any number may count as negative.
 

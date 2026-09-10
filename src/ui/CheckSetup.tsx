@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { IconPlus } from '@tabler/icons-react';
 import { ALL_FILES, createGroup, openCheckSetup, startCheck, useAppState } from '../state/store';
-import { MADE_OF_OPTIONS, ROUNDING_LABEL } from '../lib/format';
+import { ROUNDING_LABEL } from '../lib/format';
 import type { Rounding } from '../types';
-import { Segmented } from './common';
+import { MatchControl } from './common';
 
 export function CheckSetup() {
   const s = useAppState();
@@ -46,8 +46,8 @@ export function CheckSetup() {
         </select>
       </div>
       <div className="line">
-        <span className="sentence">Match with</span>
-        <Segmented label="How many numbers may add up to each one" options={MADE_OF_OPTIONS} value={maxCount} onChange={setMaxCount} />
+        <span className="sentence">Match</span>
+        <MatchControl label="How many numbers may add up to each one" value={maxCount} onChange={setMaxCount} />
         <label className="inline">
           <span className="sentence">Rounding</span>
           <select value={rounding} onChange={e => setRounding(e.target.value as Rounding)}>

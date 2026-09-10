@@ -52,7 +52,8 @@ test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to who
 
 test('sign flips: 3,234.56 is gross interest minus the early withdrawal penalty', async ({ page }) => {
   await open(page, ['workpapers.xlsx']);
-  await page.getByRole('radio', { name: 'up to 2' }).first().click();
+  await page.getByLabel('Most numbers in a sum').first().fill('2');
+  await expect(page.getByRole('radio', { name: 'Sums of up to' }).first()).toHaveAttribute('aria-checked', 'true');
   await page.getByLabel('Also try negatives').first().check();
   await page.getByLabel('Rounding').first().selectOption('exact');
   await find(page, '3,234.56');
@@ -78,7 +79,7 @@ test('not found shows the nearest number: 9,120 withheld vs W-2 box 2 9,102.00',
 
 test('several searches run side by side', async ({ page }) => {
   await open(page, SOURCES);
-  await page.getByRole('radio', { name: 'any' }).first().click();
+  await page.getByRole('radio', { name: 'Any sum' }).first().click();
   for (const t of ['90,235', '3,235', '2,000', '85,000']) await find(page, t);
   await expect(page.locator('.search-row')).toHaveCount(4);
   await expect(page.locator('.search-row .status', { hasText: 'Running' })).toHaveCount(0, { timeout: 30_000 });

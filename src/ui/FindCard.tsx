@@ -1,8 +1,8 @@
 import { IconListCheck } from '@tabler/icons-react';
 import { ALL_FILES, openCheckSetup, runSearch, setFind, setFindText, useAppState } from '../state/store';
-import { MADE_OF_OPTIONS, ROUNDING_LABEL } from '../lib/format';
+import { ROUNDING_LABEL } from '../lib/format';
 import type { Rounding } from '../types';
-import { Segmented } from './common';
+import { MatchControl } from './common';
 
 export function FindCard() {
   const s = useAppState();
@@ -36,8 +36,8 @@ export function FindCard() {
           <kbd>Enter</kbd>
         </div>
         <div className="line">
-          <span className="sentence">Match with</span>
-          <Segmented label="How many numbers may add up to it" options={MADE_OF_OPTIONS} value={f.maxCount} onChange={maxCount => setFind({ maxCount })} />
+          <span className="sentence">Match</span>
+          <MatchControl label="How many numbers may add up to it" value={f.maxCount} onChange={maxCount => setFind({ maxCount })} />
           <label className="inline">
             <span className="sentence">Rounding</span>
             <select value={f.rounding} onChange={e => setFind({ rounding: e.target.value as Rounding })}>

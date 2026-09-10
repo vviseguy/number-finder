@@ -181,6 +181,14 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .segmented button { border: none; background: var(--panel); padding: 5px 11px; cursor: pointer; color: var(--text-2); font-size: 13px; }
 .segmented button + button { border-left: 1px solid var(--line-2); }
 .segmented button.on { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.seg-sum { display: inline-flex; align-items: center; border-left: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
+.seg-sum button { background: transparent !important; }
+.seg-sum input {
+  width: 48px; min-height: 0 !important; padding: 2px 4px !important; margin-right: 6px;
+  text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; border-radius: 4px;
+}
+.seg-sum.on { background: var(--accent-soft); }
+.seg-sum.on button { color: var(--accent-text); font-weight: 600; }
 
 .gtag {
   display: inline-flex; align-items: center; gap: 4px;

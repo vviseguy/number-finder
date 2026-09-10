@@ -1,6 +1,6 @@
 import { IconArrowsExchange, IconSearch } from '@tabler/icons-react';
 import { amountIndex, groupName, retryWith, showPreview, useAppState, type SearchRun } from '../state/store';
-import { diffPhrase, formatMoney, locationShort, madeOfLabel, ROUNDING_SHORT } from '../lib/format';
+import { diffPhrase, formatMoney, locationShort, madeOfPhrase, ROUNDING_SHORT } from '../lib/format';
 import type { Match, MatchItem } from '../types';
 import { arrowNav } from './common';
 import { Preview } from './Preview';
@@ -78,9 +78,9 @@ function ItemRow({ item, match, run, previewId, nested }: { item: MatchItem; mat
 function NotFound({ run: r }: { run: SearchRun }) {
   const s = useAppState();
   const near = r.nearest && amountIndex(s).get(r.nearest.id);
-  const how = `${madeOfLabel(r.settings.maxCount) === '1 number' ? 'as a single number' : `using ${madeOfLabel(r.settings.maxCount)} numbers`}, ${ROUNDING_SHORT[r.settings.rounding]}`;
+  const how = `${madeOfPhrase(r.settings.maxCount)}, ${ROUNDING_SHORT[r.settings.rounding]}`;
   const tries: { label: string; patch: Parameters<typeof retryWith>[3] }[] = [];
-  if (r.settings.maxCount !== null && r.settings.maxCount < 3) tries.push({ label: 'Try up to 3 numbers', patch: { maxCount: 3, groupId: r.settings.groupId } });
+  if (r.settings.maxCount !== null && r.settings.maxCount < 3) tries.push({ label: 'Try sums of up to 3', patch: { maxCount: 3, groupId: r.settings.groupId } });
   if (!r.settings.allowFlips) tries.push({ label: 'Also try negatives', patch: { allowFlips: true, groupId: r.settings.groupId } });
   if (r.settings.rounding === 'exact') tries.push({ label: 'Round to whole dollars', patch: { rounding: 'dollar', groupId: r.settings.groupId } });
 

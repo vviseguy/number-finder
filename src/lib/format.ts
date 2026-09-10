@@ -61,13 +61,25 @@ export const ROUNDING_LABEL: Record<Rounding, string> = {
 };
 export const ROUNDING_SHORT: Record<Rounding, string> = { dollar: 'whole dollars', cent: 'within 1 cent', exact: 'exact' };
 
-export const MADE_OF_OPTIONS: { value: number | null; label: string }[] = [
-  { value: 1, label: '1 number' },
-  { value: 2, label: 'up to 2' },
-  { value: 3, label: 'up to 3' },
-  { value: null, label: 'any' },
-];
-export const madeOfLabel = (n: number | null) => MADE_OF_OPTIONS.find(o => o.value === n)?.label ?? `up to ${n}`;
+// How many numbers may add up to the target: 1 (the number itself), a sum of up to N numbers,
+// or any sum. Every choice also finds the number itself, and exact matches are listed first.
+export const MIN_SUM_SIZE = 2;
+export const MAX_SUM_SIZE = 20;
+export const MADE_OF_HINT = 'How many numbers may add up to it. Exact matches of the number itself always show first.';
+
+/** Short form for summaries: "1 number", "sums of up to 3", "any sum". */
+export function madeOfLabel(n: number | null): string {
+  if (n === 1) return '1 number';
+  if (n === null) return 'any sum';
+  return `sums of up to ${n}`;
+}
+
+/** For sentences: "Nothing makes 9,120 as a single number or a sum of up to 3 numbers". */
+export function madeOfPhrase(n: number | null): string {
+  if (n === 1) return 'as a single number';
+  if (n === null) return 'as a single number or any sum';
+  return `as a single number or a sum of up to ${n} numbers`;
+}
 
 export const KIND_LABEL: Record<FileKind, string> = { pdf: 'PDF', excel: 'Excel', csv: 'CSV' };
 
