@@ -467,7 +467,11 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .chip { border: 1px solid var(--line-2); background: var(--panel); border-radius: 999px; padding: 3px 12px; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
 .chip.on { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 .table-wrap { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: clip; }
-.tieout { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tieout { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.tieout th:nth-child(1) { width: 96px; }
+.tieout th:nth-child(2) { width: 32%; }
+.tieout th:nth-child(3) { width: 96px; }
+.tieout td { overflow-wrap: anywhere; }
 .tieout th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 600; color: var(--text-2); padding: 8px 12px; border-bottom: 1px solid var(--line-2); font-size: 12px; z-index: 1; }
 .tieout th.num, .tieout td.num { text-align: right; white-space: nowrap; }
 .tieout td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
