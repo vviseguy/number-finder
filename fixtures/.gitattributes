@@ -1,0 +1,2 @@
+# Fixtures are byte-exact test inputs: never convert line endings (locked.pdf's offsets and encrypted stream would break).
+* binary
