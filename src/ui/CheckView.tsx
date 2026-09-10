@@ -41,7 +41,7 @@ export function CheckView() {
   const current = run.rows.find(r => r.amountId === selected) ?? rows[0] ?? null;
 
   // Likely-intended numbers for misses, and swapped-digit singles that a coincidental sum could hide.
-  const candidates = useMemo(() => groupAmounts(s, run.againstGroupId), [s.files, s.groups, run.againstGroupId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const candidates = useMemo(() => groupAmounts(s, run.againstGroupId), [s.files, s.groups, run.againstGroupId]);
   const nearOf = useMemo(() => {
     const map = new Map<string, NearMiss<Amount> | null>();
     for (const r of run.rows) {

@@ -97,8 +97,17 @@ function PdfPage({ file, page, highlight }: { file: FileEntry; page: number; hig
     [file.parsed, page],
   );
 
+  // Center the highlighted number inside the preview's own scroll area. (scrollIntoView would also scroll
+  // the whole page, making the table jump every time a row is selected.)
   const hitRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => { hitRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [highlight.id, viewport]);
+  useEffect(() => {
+    const hit = hitRef.current;
+    const box = hit?.closest<HTMLElement>('.preview-body');
+    if (!hit || !box) return;
+    const b = box.getBoundingClientRect();
+    const h = hit.getBoundingClientRect();
+    box.scrollTo({ top: box.scrollTop + (h.top - b.top) - (b.height - h.height) / 2, behavior: 'smooth' });
+  }, [highlight.id, viewport]);
 
   return (
     <div className="pdf-page" ref={wrap}>
