@@ -43,7 +43,7 @@ export function FindCard() {
           <div className={`query-field${scope ? ' scoped' : ''}`} ref={field}>
             {scope && (
               <span className={`scope-chip gc${scope.color}`}>
-                <IconListCheck size={13} aria-hidden /> Every number in {scope.name}
+                <IconListCheck size={13} aria-hidden /> <span className="chip-text">Every number in {scope.name}</span>
                 <button type="button" aria-label="Remove the group and search one number" title="Search one number instead" onClick={() => pick(null)}>
                   <IconX size={12} />
                 </button>
@@ -75,13 +75,17 @@ export function FindCard() {
               </div>
             )}
           </div>
-          <span className="sentence">in</span>
-          <select value={groupId} onChange={e => setFind({ groupId: e.target.value })} aria-label="Group to search">
-            <option value={ALL_FILES}>All files</option>
-            {s.groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
-          <button type="submit" className="btn primary">{scope ? 'Check' : 'Find'}</button>
-          <kbd>Enter</kbd>
+          <span className="inline">
+            <span className="sentence">in</span>
+            <select value={groupId} onChange={e => setFind({ groupId: e.target.value })} aria-label="Group to search">
+              <option value={ALL_FILES}>All files</option>
+              {s.groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </span>
+          <span className="inline">
+            <button type="submit" className="btn primary">{scope ? 'Check' : 'Find'}</button>
+            <kbd>Enter</kbd>
+          </span>
         </div>
         {echo && <p className="query-echo" role="status">{echo}</p>}
         <div className="line">

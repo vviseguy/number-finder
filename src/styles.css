@@ -303,7 +303,7 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .find-form { display: flex; flex-direction: column; gap: 10px; }
 .sentence { color: var(--text-2); }
 .query-field {
-  position: relative; flex: 1; min-width: 280px; display: flex; align-items: center; gap: 6px;
+  position: relative; flex: 1; min-width: 280px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
   border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--panel);
   padding: 3px 4px 3px 10px; min-height: 40px;
 }
@@ -314,7 +314,8 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 }
 .query-field input:focus { outline: none; }
 .query-field input::placeholder { font-weight: 400; color: var(--text-3); }
-.scope-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 4px 2px 9px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.scope-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 4px 2px 9px; font-size: 12.5px; font-weight: 600; white-space: nowrap; max-width: 100%; }
+.scope-chip .chip-text { overflow: hidden; text-overflow: ellipsis; }
 .scope-chip button { border: none; background: transparent; color: inherit; display: inline-flex; padding: 2px; border-radius: 50%; cursor: pointer; opacity: 0.75; }
 .scope-chip button:hover { background: rgba(0, 0, 0, 0.12); opacity: 1; }
 .scope-btn {
