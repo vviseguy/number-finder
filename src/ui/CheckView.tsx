@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconArrowsExchange, IconChevronLeft, IconDownload, IconPlayerStop, IconSearch } from '@tabler/icons-react';
 import {
-  amountIndex, closeCheck, groupById, groupName, retryWith, settingsSummary, startCheck, stopCheck, useAppState,
+  amountIndex, closeCheck, groupAmounts, groupById, groupName, retryWith, settingsSummary, startCheck, stopCheck, useAppState,
   type CheckRow, type RowStatus,
 } from '../state/store';
+import { findNearMiss, type NearMiss } from '../lib/nearmiss';
+import { NearButton } from './NearButton';
 import { diffPhrase, formatMoney, locationShort, madeOfPhrase, plural, ROUNDING_SHORT } from '../lib/format';
 import { download, exportCsv, exportXlsx, type ExportRow } from '../lib/exporter';
-import type { Match } from '../types';
+import type { Amount, Match } from '../types';
 import { GroupTag } from './common';
 import { Preview } from './Preview';
 
@@ -38,6 +40,18 @@ export function CheckView() {
   );
   const current = run.rows.find(r => r.amountId === selected) ?? rows[0] ?? null;
 
+  // Likely-intended numbers for misses, and swapped-digit singles that a coincidental sum could hide.
+  const candidates = useMemo(() => groupAmounts(s, run.againstGroupId), [s.files, s.groups, run.againstGroupId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nearOf = useMemo(() => {
+    const map = new Map<string, NearMiss<Amount> | null>();
+    for (const r of run.rows) {
+      if (r.status !== 'notfound' && r.status !== 'combo') continue;
+      const hit = idx.get(r.amountId);
+      if (hit) map.set(r.amountId, findNearMiss(hit.amount.value, hit.amount.decimals, candidates.filter(a => a.id !== r.amountId), a => a.value, run.settings.allowFlips));
+    }
+    return map;
+  }, [run.rows, candidates, idx, run.settings.allowFlips]);
+
   // N jumps to the next not-found row; ↑ ↓ move through the table.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -64,14 +78,17 @@ export function CheckView() {
   const exportRows = (): ExportRow[] => rows.map(r => {
     const hit = idx.get(r.amountId);
     const best = r.matches[0];
+    const near = nearOf.get(r.amountId) ?? null;
     return {
       status: r.status === 'combo' && best ? `Made of ${best.items.length}` : STATUS_LABEL[r.status],
       file: hit?.file.name ?? '',
       where: hit ? locationShort(hit.amount) : '',
       label: hit?.amount.label ?? '',
       amount: hit?.amount.value ?? 0,
-      source: best ? describeMatch(best) : r.nearest ? `Nearest: ${describeItem(r.nearest.id, r.nearest.sign)}` : '',
-      difference: best ? round2(best.diff) : r.nearest ? round2(r.nearest.diff) : null,
+      source: best
+        ? describeMatch(best) + (near?.transposed ? ` · Possible typo: ${describeItem(near.item.id, near.sign)}` : '')
+        : near ? `${near.transposed ? 'Possible typo (two digits swapped)' : 'Closest'}: ${describeItem(near.item.id, near.sign)}` : '',
+      difference: best ? round2(best.diff) : near ? round2(near.diff) : null,
     };
   });
   const describeItem = (id: string, sign: 1 | -1) => {
@@ -130,7 +147,7 @@ export function CheckView() {
             <tr><th>Status</th><th>Number in {groupName(s, run.checkGroupId)}</th><th className="num">Amount</th><th>Where it comes from</th></tr>
           </thead>
           <tbody>
-            {rows.map(r => <TieRow key={r.amountId} row={r} selected={current?.amountId === r.amountId} onSelect={() => { setSelected(r.amountId); setPreviewId(null); }} />)}
+            {rows.map(r => <TieRow key={r.amountId} row={r} near={nearOf.get(r.amountId) ?? null} selected={current?.amountId === r.amountId} onSelect={() => { setSelected(r.amountId); setPreviewId(null); }} />)}
             {!rows.length && <tr><td colSpan={4} className="muted pad">Nothing to show with this filter.</td></tr>}
           </tbody>
         </table>
@@ -138,7 +155,7 @@ export function CheckView() {
 
       {current && (
         <div className="check-detail">
-          <Detail row={current} onShow={setPreviewId} runSettings={run} />
+          <Detail row={current} near={nearOf.get(current.amountId) ?? null} onShow={setPreviewId} runSettings={run} />
           <Preview amountId={previewId ?? current.amountId} />
         </div>
       )}
@@ -148,7 +165,7 @@ export function CheckView() {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-function TieRow({ row, selected, onSelect }: { row: CheckRow; selected: boolean; onSelect: () => void }) {
+function TieRow({ row, near, selected, onSelect }: { row: CheckRow; near: NearMiss<Amount> | null; selected: boolean; onSelect: () => void }) {
   const s = useAppState();
   const idx = amountIndex(s);
   const hit = idx.get(row.amountId);
@@ -165,7 +182,8 @@ function TieRow({ row, selected, onSelect }: { row: CheckRow; selected: boolean;
       <td>
         {row.status === 'pending' && <span className="muted">Checking…</span>}
         {best && <MatchText match={best} />}
-        {row.status === 'notfound' && (row.nearest ? <NearestText id={row.nearest.id} diff={row.nearest.diff} target={hit.amount.value} decimals={hit.amount.decimals} /> : <span className="muted">Nothing close</span>)}
+        {best && near?.transposed && <span className="pill typo">Possible typo: {formatMoney(near.value, near.item.decimals)}</span>}
+        {row.status === 'notfound' && (near ? <NearText near={near} target={hit.amount.value} decimals={hit.amount.decimals} /> : <span className="muted">Nothing close</span>)}
       </td>
     </tr>
   );
@@ -196,13 +214,18 @@ function MatchText({ match }: { match: Match }) {
   );
 }
 
-function NearestText({ id, diff, target, decimals }: { id: string; diff: number; target: number; decimals: number }) {
-  const h = amountIndex().get(id);
+function NearText({ near, target, decimals }: { near: NearMiss<Amount>; target: number; decimals: number }) {
+  const h = amountIndex().get(near.item.id);
   if (!h) return null;
-  return <span className="muted">Nearest: {h.file.name} · {h.amount.label || locationShort(h.amount)} · {formatMoney(h.amount.value, h.amount.decimals)} ({diffPhrase(diff, target, decimals)})</span>;
+  return (
+    <span className="muted">
+      {near.transposed ? <span className="pill typo">Two digits swapped?</span> : 'Close:'}{' '}
+      {h.file.name} · {h.amount.label || locationShort(h.amount)} · {formatMoney(near.value, h.amount.decimals)} ({diffPhrase(near.diff, target, decimals)})
+    </span>
+  );
 }
 
-function Detail({ row, onShow, runSettings }: { row: CheckRow; onShow: (id: string) => void; runSettings: { againstGroupId: string; settings: { maxCount: number | null; rounding: 'exact' | 'cent' | 'dollar'; allowFlips: boolean } } }) {
+function Detail({ row, near, onShow, runSettings }: { row: CheckRow; near: NearMiss<Amount> | null; onShow: (id: string) => void; runSettings: { againstGroupId: string; settings: { maxCount: number | null; rounding: 'exact' | 'cent' | 'dollar'; allowFlips: boolean } } }) {
   const s = useAppState();
   const idx = amountIndex(s);
   const hit = idx.get(row.amountId);
@@ -239,19 +262,19 @@ function Detail({ row, onShow, runSettings }: { row: CheckRow; onShow: (id: stri
         </div>
       )}
 
+      {row.status === 'combo' && near?.transposed && (
+        <>
+          <p className="muted">This sum could be a coincidence: a single number matches except for two swapped digits.</p>
+          <NearButton near={near} target={amount.value} decimals={amount.decimals} onShow={onShow} />
+        </>
+      )}
+
       {row.status === 'notfound' && (
         <>
           <p>Nothing in {groupName(s, runSettings.againstGroupId)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount)}, {ROUNDING_SHORT[st.rounding]}.</p>
-          {row.nearest && (() => {
-            const n = idx.get(row.nearest.id);
-            return n ? (
-              <button type="button" className="nearest" onClick={() => onShow(n.amount.id)}>
-                <span className="muted">Nearest number</span>
-                <span><b>{n.file.name}</b> · {locationShort(n.amount)} {n.amount.label && <span className="label">{n.amount.label}</span>}</span>
-                <span><span className="num">{formatMoney(row.nearest.sign * n.amount.value, n.amount.decimals)}</span> <span className="muted">{diffPhrase(row.nearest.diff, amount.value, amount.decimals)}</span></span>
-              </button>
-            ) : null;
-          })()}
+          {near
+            ? <NearButton near={near} target={amount.value} decimals={amount.decimals} onShow={onShow} />
+            : <p className="muted">Nothing in {groupName(s, runSettings.againstGroupId)} is close to it either.</p>}
           <div className="line">
             <button
               type="button"

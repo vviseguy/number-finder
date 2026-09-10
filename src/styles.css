@@ -94,7 +94,7 @@ kbd {
 .num, .amount-input, .limit, .tieout td.num, .sheet-window td.n { font-variant-numeric: tabular-nums; }
 
 /* ---------- shell ---------- */
-.shell { min-height: 100%; display: flex; flex-direction: column; }
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
 .topbar {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 20px;
@@ -210,6 +210,8 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .pill.mixed { background: var(--warn-soft); color: var(--warn); }
 .pill.wait { background: var(--sunken); color: var(--text-3); }
 .pill.flip { background: var(--sunken); color: var(--text-2); font-weight: 500; margin-left: 6px; }
+.pill.typo { background: var(--warn-soft); color: var(--warn); margin: 0 4px; }
+.nearest.typo { border-color: var(--warn); background: var(--warn-soft); }
 
 .bar { display: block; height: 4px; background: var(--sunken); border-radius: 2px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.2s linear; }

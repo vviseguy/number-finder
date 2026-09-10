@@ -1,6 +1,8 @@
 import { IconArrowsExchange, IconSearch } from '@tabler/icons-react';
-import { amountIndex, groupName, retryWith, showPreview, useAppState, type SearchRun } from '../state/store';
-import { diffPhrase, formatMoney, locationShort, madeOfPhrase, ROUNDING_SHORT } from '../lib/format';
+import { amountIndex, groupAmounts, groupName, retryWith, showPreview, useAppState, type SearchRun } from '../state/store';
+import { formatMoney, locationShort, madeOfPhrase, ROUNDING_SHORT } from '../lib/format';
+import { findNearMiss } from '../lib/nearmiss';
+import { NearButton } from './NearButton';
 import type { Match, MatchItem } from '../types';
 import { arrowNav } from './common';
 import { Preview } from './Preview';
@@ -77,7 +79,8 @@ function ItemRow({ item, match, run, previewId, nested }: { item: MatchItem; mat
 
 function NotFound({ run: r }: { run: SearchRun }) {
   const s = useAppState();
-  const near = r.nearest && amountIndex(s).get(r.nearest.id);
+  const candidates = groupAmounts(s, r.settings.groupId).filter(a => a.id !== r.originId);
+  const near = findNearMiss(r.target, r.targetDecimals, candidates, a => a.value, r.settings.allowFlips);
   const how = `${madeOfPhrase(r.settings.maxCount)}, ${ROUNDING_SHORT[r.settings.rounding]}`;
   const tries: { label: string; patch: Parameters<typeof retryWith>[3] }[] = [];
   if (r.settings.maxCount !== null && r.settings.maxCount < 3) tries.push({ label: 'Try sums of up to 3', patch: { maxCount: 3, groupId: r.settings.groupId } });
@@ -88,13 +91,9 @@ function NotFound({ run: r }: { run: SearchRun }) {
     <div className="not-found">
       <p><b>Not found.</b> Nothing in {groupName(s, r.settings.groupId)} makes {formatMoney(r.target, r.targetDecimals)} {how}.</p>
       {r.reason === 'timeLimit' && <p className="muted">The search hit its time limit before checking every combination.</p>}
-      {near && r.nearest && (
-        <button type="button" className="nearest" onClick={() => showPreview(near.amount.id)}>
-          <span className="muted">Nearest number</span>
-          <span><b>{near.file.name}</b> · {locationShort(near.amount)} {near.amount.label && <span className="label">{near.amount.label}</span>}</span>
-          <span><span className="num">{formatMoney(r.nearest.sign * near.amount.value, near.amount.decimals)}</span> <span className="muted">{diffPhrase(r.nearest.diff, r.target, r.targetDecimals)}</span></span>
-        </button>
-      )}
+      {near
+        ? <NearButton near={near} target={r.target} decimals={r.targetDecimals} onShow={showPreview} />
+        : <p className="muted">Nothing in {groupName(s, r.settings.groupId)} is close to it either.</p>}
       {tries.length > 0 && (
         <div className="line">
           {tries.map(t => (

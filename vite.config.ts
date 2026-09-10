@@ -37,7 +37,9 @@ export default defineConfig({
     assetsInlineLimit: 100_000_000,
     chunkSizeWarningLimit: 20_000,
   },
-  worker: { format: 'es' },
+  // Classic (IIFE) workers, not module workers: Chromium refuses module workers started from blob URLs on
+  // pages opened from disk (file://), which is exactly how people open numberfinder.html. Classic works.
+  worker: { format: 'iife' },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],

@@ -40,7 +40,8 @@ test('the page cannot reach the network', async ({ page }) => {
 });
 
 test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to whole dollars', async ({ page }) => {
-  await open(page, [...SOURCES, ...RETURN]);
+  // Only the source documents: the return itself contains 3,235 exactly, which would (rightly) rank first.
+  await open(page, SOURCES);
   await find(page, '3,235');
   const first = page.locator('.result-row').first();
   await expect(first).toContainText('1099-INT.pdf');
@@ -101,8 +102,9 @@ test('check a group: the return against the source documents', async ({ page }) 
   const text = (await rows.allInnerTexts()).join('\n');
   expect(text).toMatch(/Found[\s\S]*85,000/);          // wages tie to the W-2
   expect(text).toMatch(/Made of 3[\s\S]*90,235/);      // total income = wages + interest + dividends
-  expect(text).toMatch(/Not found[\s\S]*9,120/);       // withholding typo vs 9,102
-  expect(text).toContain('Nearest');
+  expect(text).toContain('Two digits swapped?');       // Schedule B 3,253 vs the 1099-INT's 3,235
+  expect(text).toContain('Possible typo: 9,102.00');   // 9,120 withheld: a 3-number coincidence, but W-2 box 2 is 9,102
+  expect(text).toContain('Nothing close');             // 410 tax-exempt interest has no source
   await page.screenshot({ path: path.join(SHOTS, '06-check.png'), fullPage: true });
 
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export to Excel' }).click()]);

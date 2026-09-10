@@ -1,16 +1,15 @@
 // pdf.js set up for a page that must work offline from a single HTML file:
-// the worker is inlined as text and started from a blob URL, and nothing is fetched.
+// its worker is bundled inline as a classic worker (see pdf-worker.ts), and nothing is fetched.
 
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import workerSource from 'pdfjs-dist/build/pdf.worker.min.mjs?raw';
+import PdfWorker from './pdf-worker.ts?worker&inline';
 
 let configured = false;
 
 export function getPdfjs(): typeof pdfjs {
   if (!configured) {
-    const url = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
-    pdfjs.GlobalWorkerOptions.workerPort = new Worker(url, { type: 'module' });
+    pdfjs.GlobalWorkerOptions.workerPort = new PdfWorker();
     configured = true;
   }
   return pdfjs;

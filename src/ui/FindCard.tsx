@@ -23,7 +23,7 @@ export function FindCard() {
             className="amount-input"
             inputMode="decimal"
             autoComplete="off"
-            placeholder="3,235"
+            placeholder="Type a number"
             value={s.findText}
             onChange={e => setFindText(e.target.value)}
           />

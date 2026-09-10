@@ -105,7 +105,7 @@ function emit() {
 function set(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
   state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(saveSetup, 300);
+  persistTimer = setTimeout(() => { persistTimer = undefined; saveSetup(); }, 300);
   emit();
 }
 
@@ -147,6 +147,19 @@ function loadSetup(): AppState {
   } catch {
     return base;
   }
+}
+
+// Saves are debounced; flush the pending one when the page is closed, reloaded, or hidden so a change
+// made just before leaving isn't lost.
+function flushSetup() {
+  if (persistTimer === undefined) return;
+  clearTimeout(persistTimer);
+  persistTimer = undefined;
+  saveSetup();
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushSetup);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSetup(); });
 }
 
 function saveSetup() {
@@ -192,6 +205,11 @@ export function groupFiles(s: AppState, id: string): { file: FileEntry; limit: F
   });
 }
 
+/** Every amount in a group's loaded files. */
+export function groupAmounts(s: AppState, id: string): Amount[] {
+  return groupFiles(s, id).flatMap(m => m.file.parsed?.amounts ?? []);
+}
+
 export function groupsOfFile(s: AppState, key: string): Group[] {
   return s.groups.filter(g => g.members.some(m => m.key === key));
 }
@@ -217,6 +235,15 @@ export function dismissNotice() { clearTimeout(noticeTimer); set({ notice: null 
 
 const fileKey = (f: { name: string; size: number }) => `${f.name}|${f.size}`;
 
+/** A file that never finishes reading must say so instead of showing "Reading…" forever. */
+const READ_TIMEOUT_MS = 60_000;
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
+  });
+}
+
 export async function addFiles(list: File[]): Promise<void> {
   const fresh = list.filter(f => !state.files.some(e => e.key === fileKey(f)));
   const dupes = list.length - fresh.length;
@@ -228,11 +255,15 @@ export async function addFiles(list: File[]): Promise<void> {
     try {
       const data = await fresh[i].arrayBuffer();
       fileData.set(entry.id, data);
-      const parsed = await extractFile({ id: entry.id, name: entry.name, size: entry.size, data: data.slice(0) }, { pdfjs: getPdfjs() });
+      const parsed = await withTimeout(
+        extractFile({ id: entry.id, name: entry.name, size: entry.size, data: data.slice(0) }, { pdfjs: getPdfjs() }),
+        READ_TIMEOUT_MS,
+      );
       updateFile(entry.id, { status: 'ready', parsed });
     } catch (err) {
       console.error(err);
-      updateFile(entry.id, { status: 'error', error: "Couldn't read this file." });
+      const timedOut = err instanceof Error && err.message === 'timeout';
+      updateFile(entry.id, { status: 'error', error: timedOut ? "Couldn't read this file: it took longer than a minute." : "Couldn't read this file." });
     }
   }));
 }
