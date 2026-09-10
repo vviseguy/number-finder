@@ -1,10 +1,11 @@
-import { IconCheck, IconListCheck, IconPlayerPlay, IconPlayerStop, IconRefresh, IconX } from '@tabler/icons-react';
+import { IconCheck, IconHistory, IconListCheck, IconPencil, IconPlayerPlay, IconPlayerStop, IconRefresh, IconX } from '@tabler/icons-react';
 import {
-  clearFinished, groupById, groupName, removeRun, rerunRun, runSummary, selectRun, stopRun, useAppState,
+  clearFinished, editRun, groupById, groupName, removeRun, rerunRun, runSummary, selectRun, stopRun, useAppState, viewVersion,
   type CheckRun, type Run, type SearchRun,
 } from '../state/store';
 import { formatMoney, plural } from '../lib/format';
 import { arrowNav, GroupTag } from './common';
+import { formatTime } from './checkParts';
 
 export function RunList() {
   const s = useAppState();
@@ -21,7 +22,7 @@ export function RunList() {
       </h3>
       <ul className="search-list" onKeyDown={arrowNav}>
         {s.runs.map(r => (
-          <li key={r.id} className={`search-row${r.id === s.selectedRunId ? ' selected' : ''}`}>
+          <li key={r.id} className={`search-row${r.id === s.selectedRunId ? ' selected' : ''}${r.id === s.editingRunId ? ' editing' : ''}`}>
             <button type="button" data-nav className="search-main" aria-current={r.id === s.selectedRunId} onClick={() => selectRun(r.id)}>
               {r.kind === 'search'
                 ? <span className="target num">{formatMoney(r.target, r.targetDecimals)}</span>
@@ -34,7 +35,11 @@ export function RunList() {
               <span className="meta">{runSummary(s, r)}</span>
               {r.status === 'running' && <Progress run={r} />}
             </button>
+            {r.history.length > 0 && <VersionPicker run={r} />}
             {r.kind === 'search' ? <SearchStatus run={r} /> : <CheckStatus run={r} />}
+            <button type="button" className="icon-btn" aria-label={r.kind === 'search' ? 'Edit search' : 'Edit check'} title="Edit: load it into the box; running it again keeps this version" onClick={() => editRun(r.id)}>
+              <IconPencil size={13} />
+            </button>
             <button type="button" className="icon-btn" aria-label="Remove from the list" title="Remove" onClick={() => removeRun(r.id)}>
               <IconX size={13} />
             </button>
@@ -42,6 +47,23 @@ export function RunList() {
         ))}
       </ul>
     </section>
+  );
+}
+
+/** "v3 ▾": the current version plus every earlier one, newest first. */
+function VersionPicker({ run: r }: { run: Run }) {
+  return (
+    <span className="version-pick" title="Past versions of this search">
+      <IconHistory size={13} aria-hidden />
+      <select
+        aria-label="Version"
+        value={r.viewing === null ? 'current' : String(r.viewing)}
+        onChange={e => viewVersion(r.id, e.target.value === 'current' ? null : Number(e.target.value))}
+      >
+        <option value="current">v{r.version} (current)</option>
+        {r.history.map((v, i) => <option key={i} value={i}>v{i + 1} · {formatTime(v.at)}{v.run.kind === 'search' ? ` · ${formatMoney(v.run.target, v.run.targetDecimals)}` : ''}</option>).reverse()}
+      </select>
+    </span>
   );
 }
 

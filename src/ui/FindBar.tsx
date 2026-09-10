@@ -1,20 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconChevronDown, IconListCheck, IconX } from '@tabler/icons-react';
-import { ALL_FILES, groupAmounts, groupById, setFind, setFindText, setScope, submitFind, useAppState } from '../state/store';
-import { plural, ROUNDING_LABEL } from '../lib/format';
+import { IconChevronDown, IconListCheck, IconPencil, IconUpload, IconX } from '@tabler/icons-react';
+import {
+  addFiles, ALL_FILES, cancelEdit, groupAmounts, groupById, setFind, setFindText, setScope, submitFind, useAppState,
+} from '../state/store';
+import { formatMoney, plural, ROUNDING_LABEL } from '../lib/format';
 import { parseQuery, termsSentence } from '../lib/query';
 import type { Rounding } from '../types';
 import { MatchControl } from './common';
 
+const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt';
+
+export function chooseFiles() { document.getElementById('file-input')?.click(); }
+
 /**
- * One box for both jobs. Type a number (plus optional filter words like -hours), or pick a group with
- * "Check a group" to look up every number in it. The same Match, Rounding, and negatives settings apply.
+ * The strip under the header, on every view: where files are dropped and where searches start.
+ * Type a number (plus optional filter words like -hours), or pick a group with "Check a group" to look up
+ * every number in it. Editing a run loads it here; submitting replaces it and keeps the old version.
  */
-export function FindCard() {
+export function FindBar() {
   const s = useAppState();
   const f = s.find;
   const groupId = f.groupId === ALL_FILES || groupById(s, f.groupId) ? f.groupId : ALL_FILES;
   const scope = groupById(s, s.scopeGroupId);
+  const editing = s.runs.find(r => r.id === s.editingRunId);
   const [menuOpen, setMenuOpen] = useState(false);
   const field = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -22,6 +30,8 @@ export function FindCard() {
   const echo = scope && q.value !== null
     ? `A group is picked, so ${q.valueText} will be ignored. Remove the group to search for one number.`
     : termsSentence(q.terms);
+
+  useEffect(() => { if (s.editingRunId) input.current?.focus(); }, [s.editingRunId]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -35,10 +45,19 @@ export function FindCard() {
   const pick = (id: string | null) => { setScope(id); setMenuOpen(false); input.current?.focus(); };
 
   return (
-    <section className="card find-card" aria-labelledby="h-find">
-      <h2 id="h-find" className="step-h"><span className="step">3</span> {scope ? 'Check a group' : 'Find a number'}</h2>
-      <form className="find-form" onSubmit={e => { e.preventDefault(); submitFind(); }}>
-        <div className="line">
+    <section className="strip" aria-label="Add files and find a number">
+      {editing && (
+        <p className="editing-banner">
+          <IconPencil size={13} aria-hidden /> Editing {editing.kind === 'search' ? `the search for ${formatMoney(editing.target, editing.targetDecimals)}` : 'this check'} · pressing {scope ? 'Check' : 'Find'} replaces it and keeps version {editing.version}.
+          <button type="button" className="link" onClick={cancelEdit}>Cancel</button>
+        </p>
+      )}
+      <form className="strip-form" onSubmit={e => { e.preventDefault(); submitFind(); }}>
+        <div className="line strip-line">
+          <span className="drop-chip">
+            <IconUpload size={14} stroke={1.75} aria-hidden />
+            <span>Drop files anywhere, or <button type="button" className="link" onClick={chooseFiles}>choose files</button></span>
+          </span>
           <label htmlFor="find-input" className="sentence">Find what makes</label>
           <div className={`query-field${scope ? ' scoped' : ''}`} ref={field}>
             {scope && (
@@ -83,12 +102,12 @@ export function FindCard() {
             </select>
           </span>
           <span className="inline">
-            <button type="submit" className="btn primary">{scope ? 'Check' : 'Find'}</button>
+            <button type="submit" className="btn primary">{editing ? (scope ? 'Check again' : 'Find again') : scope ? 'Check' : 'Find'}</button>
             <kbd>Enter</kbd>
           </span>
         </div>
         {echo && <p className="query-echo" role="status">{echo}</p>}
-        <div className="line">
+        <div className="line strip-options">
           <span className="sentence">Match</span>
           <MatchControl label="How many numbers may add up to it" value={f.maxCount} onChange={maxCount => setFind({ maxCount })} />
           <label className="inline">
@@ -100,11 +119,17 @@ export function FindCard() {
           <label className="inline check" title="Let any number count as negative, e.g. a penalty that reduces interest">
             <input type="checkbox" checked={f.allowFlips} onChange={e => setFind({ allowFlips: e.target.checked })} /> Also try negatives
           </label>
+          <span className="hint push">Add a word to search only numbers labeled with it, or <b>-word</b> to skip them, like <b>-hours</b>.</span>
         </div>
-        <p className="hint">
-          Add a word to search only numbers labeled with it, or <b>-word</b> to skip them, like <b>-hours</b>. Click any number in a preview to search for it.
-        </p>
       </form>
+      <input
+        id="file-input"
+        type="file"
+        multiple
+        accept={ACCEPT}
+        hidden
+        onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; if (files.length) void addFiles(files); }}
+      />
     </section>
   );
 }

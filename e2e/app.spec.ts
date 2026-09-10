@@ -10,9 +10,11 @@ mkdirSync(SHOTS, { recursive: true });
 const SOURCES = ['W-2.pdf', '1099-INT.pdf', '1099-DIV.pdf', 'workpapers.xlsx'];
 const RETURN = ['1040 draft.pdf', 'Schedule B.pdf'];
 
+const tab = (page: Page, name: string) => page.locator('.step-tab', { hasText: name });
+
 async function open(page: Page, files: string[]) {
   await page.goto(APP);
-  await page.locator('input[type="file"]').setInputFiles(files.map(f => path.join(FIX, f)));
+  await page.locator('#file-input').setInputFiles(files.map(f => path.join(FIX, f)));
   for (const f of files) await expect(page.locator('.file-row', { hasText: f })).toBeVisible();
   await expect(page.getByText('Reading…')).toHaveCount(0);
 }
@@ -23,6 +25,7 @@ async function find(page: Page, text: string) {
 }
 
 async function makeGroup(page: Page, name: string, files: string[]) {
+  await tab(page, 'Groups').click();
   await page.getByRole('button', { name: 'Add group' }).click();
   const nameInput = page.getByLabel('Group name');
   await nameInput.fill(name);
@@ -39,6 +42,36 @@ test('the page cannot reach the network', async ({ page }) => {
   await page.screenshot({ path: path.join(SHOTS, '01-first-run.png') });
 });
 
+test('the three steps are the navigation', async ({ page }) => {
+  await open(page, ['W-2.pdf']);
+  await expect(tab(page, 'Files')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.files-table .file-row')).toHaveCount(1);
+  await page.locator('.file-row').first().click();
+  await expect(page.locator('.files-workspace .side-pane .pdf-page')).toBeVisible();
+  await tab(page, 'Groups').click();
+  await expect(page.getByRole('button', { name: 'Add group' })).toBeVisible();
+  await tab(page, 'Find').click();
+  await expect(page.locator('.main-empty')).toBeVisible();
+  await find(page, '85,000');
+  await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
+  await page.screenshot({ path: path.join(SHOTS, '02-files-view.png') });
+});
+
+test('a file can be given a short name that is used everywhere and remembered', async ({ page }) => {
+  await open(page, ['W-2.pdf']);
+  await page.getByRole('button', { name: 'Rename W-2.pdf' }).click();
+  const input = page.getByLabel('Short name for W-2.pdf');
+  await input.fill('W2');
+  await input.press('Enter');
+  await expect(page.locator('.file-row').first()).toContainText('W2');
+  await expect(page.locator('.file-row').first()).toContainText('W-2.pdf');
+  await find(page, '85,000');
+  await expect(page.locator('.result-row').first()).toContainText('W2 · page 1');
+  await page.reload();
+  await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
+  await expect(page.locator('.file-row').first()).toContainText('W2');
+});
+
 test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to whole dollars', async ({ page }) => {
   // Only the source documents: the return itself contains 3,235 exactly, which would (rightly) rank first.
   await open(page, SOURCES);
@@ -48,10 +81,10 @@ test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to who
   await expect(first).toContainText('3,234.56');
   await expect(first).toContainText('rounds to 3,235');
   await expect(page.locator('.side-pane .hotspot.hit')).toBeVisible();
-  await page.screenshot({ path: path.join(SHOTS, '02-lookup.png') });
+  await page.screenshot({ path: path.join(SHOTS, '03-lookup.png') });
 });
 
-test('sign flips: 3,234.56 is gross interest minus the early withdrawal penalty', async ({ page }) => {
+test('sums show as an equation that opens into the full breakdown, with −( ) for negatives', async ({ page }) => {
   await open(page, ['workpapers.xlsx']);
   await page.getByLabel('Most numbers in a sum').first().fill('2');
   await expect(page.getByRole('radio', { name: 'Sums of up to' }).first()).toHaveAttribute('aria-checked', 'true');
@@ -59,11 +92,17 @@ test('sign flips: 3,234.56 is gross interest minus the early withdrawal penalty'
   await page.getByLabel('Rounding').first().selectOption('exact');
   await find(page, '3,234.56');
   const combo = page.locator('.combo').first();
-  await expect(combo).toContainText('Made of 2 numbers');
-  await expect(combo).toContainText('3,500.00');
-  await expect(combo).toContainText('−265.44');
+  const head = combo.locator('.combo-head');
+  await expect(head).toContainText('Made of 2');
+  await expect(head).toContainText('3,500.00');
+  await expect(head).toContainText('= 3,234.56');
+  await expect(head.locator('.neg')).toHaveCount(2); // "−(" and ")"
+  await expect(combo.locator('.result-row')).toHaveCount(0); // concise until opened
+  await head.click();
+  await expect(combo.locator('.result-row')).toHaveCount(2);
+  await expect(combo.locator('.result-row.nested .flipped')).toContainText('265.44');
   await expect(combo).toContainText('counted as negative');
-  await page.screenshot({ path: path.join(SHOTS, '03-flips.png') });
+  await page.screenshot({ path: path.join(SHOTS, '04-sums.png') });
 });
 
 test('not found shows the likely typo: 9,120 withheld vs W-2 box 2 9,102.00', async ({ page }) => {
@@ -76,7 +115,37 @@ test('not found shows the likely typo: 9,120 withheld vs W-2 box 2 9,102.00', as
   await expect(nf).toContainText('W-2.pdf');
   await expect(nf).toContainText('9,102.00');
   await expect(nf).toContainText('18.00 less than 9,120');
-  await page.screenshot({ path: path.join(SHOTS, '04-not-found.png') });
+});
+
+test('a search can be edited, and its past versions viewed and restored', async ({ page }) => {
+  await open(page, SOURCES);
+  await find(page, '3,235');
+  await expect(page.locator('.search-row')).toHaveCount(1);
+  await expect(page.locator('.result-row').first()).toContainText('1099-INT.pdf');
+
+  await page.getByRole('button', { name: 'Edit search' }).click();
+  await expect(page.locator('#find-input')).toHaveValue('3,235');
+  await expect(page.locator('.editing-banner')).toContainText('keeps version 1');
+  await find(page, '85,000');
+  await expect(page.locator('.search-row')).toHaveCount(1);
+  await expect(page.locator('.search-row .target')).toContainText('85,000');
+  await expect(page.locator('.result-row').first()).toContainText('W-2.pdf');
+
+  const version = page.getByLabel('Version');
+  await expect(version).toHaveValue('current');
+  await version.selectOption('0');
+  await expect(page.locator('.version-banner')).toContainText('Viewing version 1 of 2');
+  await expect(page.locator('.result-row').first()).toContainText('1099-INT.pdf');
+  await page.screenshot({ path: path.join(SHOTS, '05-versions.png') });
+  await page.getByRole('button', { name: 'Back to current' }).click();
+  await expect(page.locator('.version-banner')).toHaveCount(0);
+  await expect(page.locator('.result-row').first()).toContainText('W-2.pdf');
+
+  await version.selectOption('0');
+  await page.getByRole('button', { name: 'Restore this version' }).click();
+  await expect(page.locator('.search-row .target')).toContainText('3,235');
+  await expect(version.locator('option[value="current"]')).toHaveText('v3 (current)');
+  await expect(page.locator('.version-banner')).toHaveCount(0);
 });
 
 test('several searches run side by side', async ({ page }) => {
@@ -85,7 +154,6 @@ test('several searches run side by side', async ({ page }) => {
   for (const t of ['90,235', '3,235', '2,000', '85,000']) await find(page, t);
   await expect(page.locator('.search-row')).toHaveCount(4);
   await expect(page.locator('.search-row .status', { hasText: 'Running' })).toHaveCount(0, { timeout: 30_000 });
-  await page.screenshot({ path: path.join(SHOTS, '05-searches.png') });
 });
 
 test('filters: -hours keeps hours out of the search', async ({ page }) => {
@@ -103,7 +171,6 @@ test('filters: -hours keeps hours out of the search', async ({ page }) => {
   await expect(rows.first()).toBeVisible();
   for (const text of await rows.allInnerTexts()) expect(text).not.toContain('Hours');
   await expect(page.locator('.search-row').first()).toContainText('skipping “hours”');
-  await page.screenshot({ path: path.join(SHOTS, '06-filters.png') });
 });
 
 test('hovering a result marks the same number everywhere', async ({ page }) => {
@@ -117,21 +184,9 @@ test('hovering a result marks the same number everywhere', async ({ page }) => {
   await expect(page.locator('.col-wrap > .rail .mark')).toHaveCount(3);
   await expect(page.locator('.side-pane .hotspot.linked, .side-pane .hotspot.hovered')).toHaveCount(1);
   await expect(page.locator('.col-wrap > .rail-count')).toContainText('3 here');
-  await page.screenshot({ path: path.join(SHOTS, '07-hover-links.png') });
+  await page.screenshot({ path: path.join(SHOTS, '06-hover-links.png') });
   await page.mouse.move(5, 5);
   await expect(page.locator('.result-row.linked')).toHaveCount(0);
-});
-
-test('files and groups can be hidden', async ({ page }) => {
-  await open(page, ['W-2.pdf']);
-  await expect(page.locator('.sidebar')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Hide files and groups' }).click();
-  await expect(page.locator('.sidebar')).toHaveCount(0);
-  await expect(page.locator('.files-summary')).toContainText('1 file · 0 groups');
-  await page.reload();
-  await expect(page.locator('.sidebar')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Show files and groups' }).click();
-  await expect(page.locator('.sidebar')).toHaveCount(1);
 });
 
 test('check a group from the same box: the return against the source documents', async ({ page }) => {
@@ -145,6 +200,7 @@ test('check a group from the same box: the return against the source documents',
   await page.getByLabel('Most numbers in a sum').first().fill('3');
   await page.getByRole('button', { name: 'Check', exact: true }).click();
 
+  await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('.progress-card')).toContainText('Checked', { timeout: 60_000 });
   await expect(page.locator('.search-row').first()).toContainText('Every number in');
   const rows = page.locator('.tieout tbody tr');
@@ -152,11 +208,12 @@ test('check a group from the same box: the return against the source documents',
   const text = (await rows.allInnerTexts()).join('\n');
   expect(text).toMatch(/Found[\s\S]*85,000/);          // wages tie to the W-2
   expect(text).toMatch(/Made of 3[\s\S]*90,235/);      // total income = wages + interest + dividends
+  expect(text).toContain('= 90,234.56');               // shown as an equation
   expect(text).toContain('Two digits swapped?');       // Schedule B 3,253 vs the 1099-INT's 3,235
   expect(text).toContain('Possible typo: 9,102.00');   // 9,120 withheld: a 3-number coincidence, but W-2 box 2 is 9,102
   expect(text).toContain('Nothing close');             // 410 tax-exempt interest has no source
   await expect(page.locator('.side-pane .detail')).toContainText('Not found');
-  await page.screenshot({ path: path.join(SHOTS, '08-check.png') });
+  await page.screenshot({ path: path.join(SHOTS, '07-check.png') });
 
   // Hovering a piece of evidence in the table links its other uses and marks them in the rail.
   await page.locator('.tieout .ev', { hasText: '85,000.00' }).first().hover();
@@ -169,7 +226,7 @@ test('check a group from the same box: the return against the source documents',
   expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
 
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.screenshot({ path: path.join(SHOTS, '09-check-dark.png') });
+  await page.screenshot({ path: path.join(SHOTS, '08-check-dark.png') });
 });
 
 test('setup is remembered, files are not', async ({ page }) => {
@@ -178,7 +235,9 @@ test('setup is remembered, files are not', async ({ page }) => {
   await page.reload();
   await expect(page.locator('.file-row:not(.missing)')).toHaveCount(0);
   await expect(page.locator('.file-row.missing')).toHaveCount(SOURCES.length);
-  await page.locator('input[type="file"]').setInputFiles(SOURCES.map(f => path.join(FIX, f)));
+  await page.locator('#file-input').setInputFiles(SOURCES.map(f => path.join(FIX, f)));
   await expect(page.locator('.file-row.missing')).toHaveCount(0);
+  await tab(page, 'Groups').click();
   await expect(page.locator('.member.missing')).toHaveCount(0);
+  await expect(page.locator('.member')).toHaveCount(SOURCES.length);
 });

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconChevronLeft, IconChevronRight, IconEye } from '@tabler/icons-react';
 import * as XLSX from 'xlsx';
 import type { PageViewport } from 'pdfjs-dist';
-import { amountIndex, fileData, searchForAmount, useAppState, type FileEntry } from '../state/store';
+import { amountIndex, fileData, fileLabel, searchForAmount, useAppState, type FileEntry } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
 import { locationShort } from '../lib/format';
 import { loadPdf } from '../lib/pdf';
@@ -29,7 +29,7 @@ export function Preview({ amountId, navIds = [], navNoun = 'Match', onNavigate }
     <div className="preview" aria-label={`Preview of ${file.name}`}>
       <div className="preview-head">
         <IconEye size={14} aria-hidden />
-        <b>{file.name}</b> · {locationShort(amount)}
+        <b title={file.name}>{fileLabel(file)}</b> · {locationShort(amount)}
         {navIds.length > 1 && i >= 0 && onNavigate && (
           <span className="push nav">
             <button type="button" className="icon-btn" aria-label={`Previous ${navNoun.toLowerCase()}`} disabled={i === 0} onClick={() => onNavigate(navIds[i - 1])}><IconChevronLeft size={14} /></button>

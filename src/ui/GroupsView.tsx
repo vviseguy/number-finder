@@ -1,29 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import { IconPencil, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
-import { addMember, createGroup, deleteGroup, removeMember, renameGroup, setLimit, useAppState, type Group } from '../state/store';
-import { describeLimit, parseLimit } from '../lib/format';
+import { addMember, createGroup, deleteGroup, fileLabel, removeMember, renameGroup, setLimit, useAppState, type Group } from '../state/store';
+import { describeLimit, parseLimit, plural } from '../lib/format';
 
-export function GroupsPanel() {
+/** Step 2: groups are sets of files to search in. A file can be in several. */
+export function GroupsView() {
   const s = useAppState();
   const [editing, setEditing] = useState<string | null>(null);
 
   return (
-    <section className="panel" aria-labelledby="h-groups">
-      <h2 id="h-groups" className="step-h">
-        <span className="step">2</span> Groups
-        <button type="button" className="btn sm push" onClick={() => setEditing(createGroup())}>
-          <IconPlus size={13} aria-hidden /> Add group
+    <div className="view groups-view">
+      <div className="line">
+        <h2 className="view-title">Groups <span className="count">{plural(s.groups.length, 'group')}</span></h2>
+        <button type="button" className="btn push" onClick={() => setEditing(createGroup())}>
+          <IconPlus size={14} aria-hidden /> Add group
         </button>
-      </h2>
-      {!s.groups.length && (
-        <p className="empty-note">
-          A group is a set of files to search in, like <b>Source docs</b> or <b>2025 return</b>. Until you make one, searches look through all files.
-        </p>
-      )}
-      {s.groups.map(g => (
-        <GroupCard key={g.id} group={g} editing={editing === g.id} onEdit={v => setEditing(v ? g.id : null)} />
-      ))}
-    </section>
+      </div>
+      <p className="muted">
+        A group is a set of files to search in, like <b>Source docs</b> or <b>2025 return</b>. A file can be in several groups. Until you make one, searches look through all files.
+        To check a whole return, put it in one group and your source documents in another.
+      </p>
+      <div className="groups-grid">
+        {s.groups.map(g => <GroupCard key={g.id} group={g} editing={editing === g.id} onEdit={v => setEditing(v ? g.id : null)} />)}
+      </div>
+    </div>
   );
 }
 
@@ -64,10 +64,11 @@ function GroupCard({ group, editing, onEdit }: { group: Group; editing: boolean;
       {group.members.length === 0 && <p className="hint">No files yet. Add some below.</p>}
       {group.members.map(m => {
         const file = loaded.get(m.key);
+        const label = file ? fileLabel(file) : s.nicks[m.key] || m.name;
         const valid = parseLimit(m.limit) !== null;
         return (
           <div key={m.key} className={`member${file ? '' : ' missing'}`}>
-            <span className="member-name" title={file ? m.name : `${m.name} isn't added yet`}>{m.name}</span>
+            <span className="member-name" title={file ? m.name : `${m.name} isn't added yet`}>{label}</span>
             <input
               className={`limit${valid ? '' : ' invalid'}`}
               value={m.limit}

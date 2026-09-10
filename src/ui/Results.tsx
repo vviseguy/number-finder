@@ -1,5 +1,9 @@
-import { IconArrowsExchange, IconSearch } from '@tabler/icons-react';
-import { amountIndex, groupAmounts, groupName, retryWith, showPreview, useAppState, type SearchRun } from '../state/store';
+import { useState } from 'react';
+import { IconArrowsExchange, IconChevronDown, IconHistory, IconSearch } from '@tabler/icons-react';
+import {
+  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, showPreview, shownRun, useAppState, viewVersion,
+  type Run, type SearchRun,
+} from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
 import { formatMoney, locationShort, madeOfPhrase, ROUNDING_SHORT } from '../lib/format';
 import { findNearMiss } from '../lib/nearmiss';
@@ -7,20 +11,44 @@ import { passesTerms, termsPhrase } from '../lib/query';
 import type { Match, MatchItem } from '../types';
 import { arrowNav } from './common';
 import { CheckResults } from './CheckResults';
+import { Equation } from './Equation';
+import { formatTime } from './checkParts';
+import { Money } from './Money';
 import { NearButton } from './NearButton';
 
 export function Results() {
   const s = useAppState();
-  const run = s.runs.find(r => r.id === s.selectedRunId);
-  if (!run) {
+  const live = s.runs.find(r => r.id === s.selectedRunId);
+  if (!live) {
     return s.files.length ? (
-      <p className="empty-note main-empty">Type a number above and press Enter, or open a file and click one of its numbers.</p>
+      <p className="empty-note main-empty">Type a number in the box above and press Enter, or open a file and click one of its numbers.</p>
     ) : null;
   }
-  return run.kind === 'search' ? <SearchResults run={run} /> : <CheckResults run={run} />;
+  const { run, past } = shownRun(live);
+  return (
+    <>
+      {past && <VersionBanner live={live} />}
+      {run.kind === 'search' ? <SearchResults run={run} readOnly={past} /> : <CheckResults run={run} readOnly={past} />}
+    </>
+  );
 }
 
-function SearchResults({ run: r }: { run: SearchRun }) {
+function VersionBanner({ live }: { live: Run }) {
+  const i = live.viewing!;
+  const v = live.history[i];
+  return (
+    <div className="version-banner" role="status">
+      <IconHistory size={14} aria-hidden />
+      <span>Viewing version {i + 1} of {live.version}, from {formatTime(v.at)}. The current version is v{live.version}.</span>
+      <span className="push line">
+        <button type="button" className="btn sm" onClick={() => viewVersion(live.id, null)}>Back to current</button>
+        <button type="button" className="btn sm" onClick={() => restoreVersion(live.id, i)}>Restore this version</button>
+      </span>
+    </div>
+  );
+}
+
+function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   const s = useAppState();
   const items = r.matches.flatMap(m => m.items.map(i => i.id));
   const previewId = s.previewId ?? items[0] ?? null;
@@ -33,7 +61,7 @@ function SearchResults({ run: r }: { run: SearchRun }) {
       </h3>
       {r.status === 'running' && !r.matches.length && <p className="muted pad">Searching…</p>}
       {r.status === 'idle' && <p className="muted pad">This search is from an earlier session. Add its files and press Run.</p>}
-      {r.status === 'done' && !r.matches.length && <NotFound run={r} />}
+      {r.status === 'done' && !r.matches.length && <NotFound run={r} readOnly={readOnly} />}
       {r.matches.length > 0 && (
         <div className="result-list" onKeyDown={arrowNav}>
           {r.matches.map((m, i) => <MatchRows key={i} match={m} run={r} previewId={previewId} />)}
@@ -44,14 +72,17 @@ function SearchResults({ run: r }: { run: SearchRun }) {
 }
 
 function MatchRows({ match, run, previewId }: { match: Match; run: SearchRun; previewId: string | null }) {
+  const [open, setOpen] = useState(false);
   if (match.items.length === 1) return <ItemRow item={match.items[0]} match={match} run={run} previewId={previewId} />;
+  const expanded = open || match.items.some(it => it.id === previewId);
   return (
-    <div className="combo">
-      <div className="combo-head">
-        <span>Made of {match.items.length} numbers</span>
-        <span className="num">= {formatMoney(match.sum)}</span>
-      </div>
-      {match.items.map(it => <ItemRow key={it.id} item={it} run={run} previewId={previewId} nested />)}
+    <div className={`combo${expanded ? ' open' : ''}`}>
+      <button type="button" className="combo-head" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>
+        <span className="combo-n">Made of {match.items.length}</span>
+        <Equation match={match} />
+        <IconChevronDown size={14} className="chev" aria-hidden />
+      </button>
+      {expanded && match.items.map(it => <ItemRow key={it.id} item={it} run={run} previewId={previewId} nested />)}
     </div>
   );
 }
@@ -61,7 +92,6 @@ function ItemRow({ item, match, run, previewId, nested }: { item: MatchItem; mat
   const link = useLinkClass(hit?.amount ?? null);
   if (!hit) return null;
   const { amount, file } = hit;
-  const value = item.sign * amount.value;
   const off = match && Math.abs(match.diff) >= 0.005;
   const roundsTo = off && run.targetDecimals === 0 && Math.round(match.sum) === run.target;
   return (
@@ -73,23 +103,23 @@ function ItemRow({ item, match, run, previewId, nested }: { item: MatchItem; mat
       {...hoverProps(amount)}
     >
       <span className="where">
-        <b>{file.name}</b> · {locationShort(amount)}
+        <b title={file.name}>{fileLabel(file)}</b> · {locationShort(amount)}
         {amount.label && <span className="label"> {amount.label}</span>}
         {item.sign === -1 && <span className="pill flip"><IconArrowsExchange size={11} aria-hidden /> counted as negative</span>}
       </span>
-      <span className="amount num">
-        {formatMoney(value, amount.decimals)}
+      <span className="amount">
+        <Money value={amount.value} decimals={amount.decimals} flipped={item.sign === -1} />
         {off && <span className="sub">{roundsTo ? `rounds to ${formatMoney(run.target, 0)}` : `off by ${formatMoney(Math.abs(match.diff))}`}</span>}
       </span>
     </button>
   );
 }
 
-function NotFound({ run: r }: { run: SearchRun }) {
+function NotFound({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   const s = useAppState();
   const idx = amountIndex(s);
   const candidates = groupAmounts(s, r.settings.groupId)
-    .filter(a => a.id !== r.originId && passesTerms(a, idx.get(a.id)?.file.name ?? '', r.terms));
+    .filter(a => a.id !== r.originId && passesTerms(a, idx.get(a.id) ? fileTermText(idx.get(a.id)!.file) : '', r.terms));
   const near = findNearMiss(r.target, r.targetDecimals, candidates, a => a.value, r.settings.allowFlips);
   const how = `${madeOfPhrase(r.settings.maxCount)}, ${ROUNDING_SHORT[r.settings.rounding]}`;
   const filters = termsPhrase(r.terms);
@@ -105,7 +135,7 @@ function NotFound({ run: r }: { run: SearchRun }) {
       {near
         ? <NearButton near={near} target={r.target} decimals={r.targetDecimals} onShow={showPreview} />
         : <p className="muted">Nothing in {groupName(s, r.settings.groupId)} is close to it either.</p>}
-      {tries.length > 0 && (
+      {!readOnly && tries.length > 0 && (
         <div className="line">
           {tries.map(t => (
             <button key={t.label} type="button" className="btn sm" onClick={() => retryWith(r.target, r.targetDecimals, r.originId, r.terms, t.patch)}>

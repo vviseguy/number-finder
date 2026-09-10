@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconDownload, IconPlayerStop } from '@tabler/icons-react';
 import {
-  amountIndex, groupAmounts, groupById, groupName, rerunRun, runSummary, selectCheckRow, stopRun, useAppState,
+  amountIndex, fileLabel, fileTermText, groupAmounts, groupById, groupName, rerunRun, runSummary, selectCheckRow, stopRun, useAppState,
   type CheckRow, type CheckRun, type RowStatus,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
@@ -11,13 +11,14 @@ import { findNearMiss, type NearMiss } from '../lib/nearmiss';
 import { passesTerms } from '../lib/query';
 import type { Amount, Match } from '../types';
 import { GroupTag } from './common';
-import { defaultRow, MatchText, NearText, sortRows, StatusPill } from './checkParts';
+import { defaultRow, NearText, SingleText, sortRows, StatusPill } from './checkParts';
+import { Equation } from './Equation';
 
 type Filter = 'all' | RowStatus;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** The tie-out table for "every number in a group". Its detail and preview live in the side pane. */
-export function CheckResults({ run }: { run: CheckRun }) {
+export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boolean }) {
   const s = useAppState();
   const idx = amountIndex(s);
   const [filter, setFilter] = useState<Filter>('all');
@@ -33,7 +34,7 @@ export function CheckResults({ run }: { run: CheckRun }) {
 
   // Likely-intended numbers for misses, and swapped-digit singles that a coincidental sum could hide.
   const candidates = useMemo(
-    () => groupAmounts(s, run.settings.groupId).filter(a => passesTerms(a, idx.get(a.id)?.file.name ?? '', run.terms)),
+    () => groupAmounts(s, run.settings.groupId).filter(a => { const h = idx.get(a.id); return h ? passesTerms(a, fileTermText(h.file), run.terms) : false; }),
     [s.files, s.groups, run.settings.groupId, run.terms, idx], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const nearOf = useMemo(() => {
@@ -70,6 +71,7 @@ export function CheckResults({ run }: { run: CheckRun }) {
     run.skippedZeros > 0 && `${plural(run.skippedZeros, 'zero amount')} skipped`,
   ].filter(Boolean).join(' · ');
 
+  // Exports use full file names so they stand on their own.
   const describeItem = (id: string, sign: 1 | -1) => {
     const h = idx.get(id);
     return h ? `${h.file.name} · ${locationShort(h.amount)}${h.amount.label ? ` · ${h.amount.label}` : ''} · ${formatMoney(sign * h.amount.value, h.amount.decimals)}` : '';
@@ -119,11 +121,13 @@ export function CheckResults({ run }: { run: CheckRun }) {
               {run.status === 'running'
                 ? <span className="accent">Checking · {done} of {run.rows.length} numbers</span>
                 : <span>{run.status === 'stopped' ? `Stopped · ${done} of ${run.rows.length} checked` : `Checked ${plural(run.rows.length, 'number')}`}</span>}
-              <span className="push">
-                {run.status === 'running'
-                  ? <button type="button" className="btn sm" onClick={() => stopRun(run.id)}><IconPlayerStop size={12} aria-hidden /> Stop</button>
-                  : <button type="button" className="btn sm" onClick={() => rerunRun(run.id)}>Run again</button>}
-              </span>
+              {!readOnly && (
+                <span className="push">
+                  {run.status === 'running'
+                    ? <button type="button" className="btn sm" onClick={() => stopRun(run.id)}><IconPlayerStop size={12} aria-hidden /> Stop</button>
+                    : <button type="button" className="btn sm" onClick={() => rerunRun(run.id)}>Run again</button>}
+                </span>
+              )}
             </div>
             <span className="bar" role="progressbar" aria-label="Checked" aria-valuemin={0} aria-valuemax={run.rows.length} aria-valuenow={done}>
               <span style={{ width: `${run.rows.length ? (done / run.rows.length) * 100 : 100}%` }} />
@@ -176,13 +180,13 @@ function TieRow({ row, near, stopped, selected, onSelect }: { row: CheckRow; nea
     <tr className={`${selected ? 'selected' : ''}${link}`} onClick={onSelect} aria-selected={selected} {...hoverProps(hit.amount)}>
       <td><StatusPill row={row} stopped={stopped} /></td>
       <td>
-        <button type="button" className="row-btn" onClick={onSelect}><b>{hit.file.name}</b> · {locationShort(hit.amount)}</button>
+        <button type="button" className="row-btn" onClick={onSelect}><b title={hit.file.name}>{fileLabel(hit.file)}</b> · {locationShort(hit.amount)}</button>
         {hit.amount.label && <div className="label">{hit.amount.label}</div>}
       </td>
       <td className="num">{formatMoney(hit.amount.value, hit.amount.decimals)}</td>
       <td>
         {row.status === 'pending' && <span className="muted">{stopped ? 'Not checked' : 'Checking…'}</span>}
-        {best && <MatchText match={best} />}
+        {best && (best.items.length === 1 ? <SingleText match={best} /> : <Equation match={best} />)}
         {best && near?.transposed && <span className="pill typo">Possible typo: {formatMoney(near.value, near.item.decimals)}</span>}
         {row.status === 'notfound' && (near ? <NearText near={near} target={hit.amount.value} decimals={hit.amount.decimals} /> : <span className="muted">Nothing close</span>)}
       </td>

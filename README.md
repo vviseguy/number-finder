@@ -14,11 +14,13 @@ Double-click **`numberfinder.html`**. It opens in your browser and works offline
 
 Everything happens inside that browser tab. The page includes a security rule (a Content-Security-Policy) that stops it from making any network connection at all, so documents can't be sent anywhere — you can check the rule at the top of the HTML file.
 
-Between sessions it remembers your **setup** — group names, which file names belong to each group, and your searches — but never the files or their contents. Drop the files in again and they slot back into their groups.
+Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, and your searches — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
 
 ## Using it
 
-1. **Files.** Drop files anywhere on the page, or use *Choose files*. Each file shows how many numbers were found. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
+The three steps in the header are the three views. The strip under the header, with the drop target and the find box, is on every view.
+
+1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. The pencil gives a file a short name (say, *INT* for a long 1099 file name) that's used everywhere in the interface and remembered for next time. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
 3. **Find a number.** Type it (or click any number in a preview), pick the group, and choose:
    - **Match:** *1 number* (where does it appear?), *Sums of up to N* (set N from 2 to 20), or *Any sum*. Exact matches of the number itself always show first.
@@ -31,7 +33,9 @@ Between sessions it remembers your **setup** — group names, which file names b
 
    Searches and checks run side by side in one list; each shows its progress and can be stopped. The pane on the right shows the selected number in its file. Hover any number, in the results or in a file, to light up every other place the same value appears; the yellow marks along the scrollbars show where those places are.
 
-   The files-and-groups column can be hidden with the button at the top left; dropping files anywhere on the page still adds them.
+   **Sums** show on one line as an equation, `W-2 85,000.00 + INT 3,234.56 + DIV 2,000.00 = 90,234.56`, and open into the full breakdown. A number counted as negative is written `−(265.44)`, with the grey minus and parentheses around the number as it appears in the file.
+
+   **Editing and versions.** The pencil on a search loads it back into the box; *Find again* replaces it and keeps the old version. The `v2 ▾` picker on the row shows every past version, read-only, with *Back to current* and *Restore this version*.
 
 **What counts as a number:** amounts like `85,000.00`, `$3,234.56`, `(265.44)`, `3,235`. Years, box and line labels (`1`, `2a`, `25a`), form names (`Form 1040`), SSNs, EINs, ZIP codes, dates, percentages, and long account numbers are skipped. Open a file's preview to see exactly which numbers were picked up — each one is clickable.
 

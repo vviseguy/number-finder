@@ -1,10 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLock, IconUpload } from '@tabler/icons-react';
-import { addFiles, setDragging, setLayout, useAppState } from '../state/store';
-import { plural } from '../lib/format';
-import { FilesPanel } from './FilesPanel';
-import { GroupsPanel } from './GroupsPanel';
-import { FindCard } from './FindCard';
+import { IconFileSearch, IconLock, IconUpload } from '@tabler/icons-react';
+import { addFiles, setDragging, setView, useAppState, type View } from '../state/store';
+import { FindBar } from './FindBar';
+import { FilesView } from './FilesView';
+import { GroupsView } from './GroupsView';
 import { RunList } from './RunList';
 import { Results } from './Results';
 import { SidePane } from './SidePane';
@@ -13,10 +12,9 @@ import { ScrollRail } from './ScrollRail';
 
 export function App() {
   const s = useAppState();
-  const hidden = s.layout.sidebarHidden;
   const main = useRef<HTMLElement>(null);
 
-  // Files can be dropped anywhere on the page, even with the files column hidden.
+  // Files can be dropped anywhere on the page, on any view.
   useEffect(() => {
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
     const over = (e: DragEvent) => { if (hasFiles(e)) { e.preventDefault(); setDragging(true); } };
@@ -38,49 +36,46 @@ export function App() {
     };
   }, []);
 
+  const steps: { view: View; n: number; label: string; count: string }[] = [
+    { view: 'files', n: 1, label: 'Files', count: String(s.files.length) },
+    { view: 'groups', n: 2, label: 'Groups', count: String(s.groups.length) },
+    { view: 'find', n: 3, label: 'Find', count: s.runs.length ? String(s.runs.length) : '' },
+  ];
+
   return (
-    <div className={`shell${hidden ? ' no-sidebar' : ''}`}>
+    <div className="shell">
       <header className="topbar">
-        <button
-          type="button"
-          className="icon-btn sidebar-toggle"
-          aria-label={hidden ? 'Show files and groups' : 'Hide files and groups'}
-          title={hidden ? 'Show files and groups' : 'Hide files and groups'}
-          aria-expanded={!hidden}
-          onClick={() => setLayout({ sidebarHidden: !hidden })}
-        >
-          {hidden ? <IconLayoutSidebarLeftExpand size={18} stroke={1.75} /> : <IconLayoutSidebarLeftCollapse size={18} stroke={1.75} />}
-        </button>
         <IconFileSearch className="brand-icon" size={20} stroke={1.75} aria-hidden />
         <h1>Number finder</h1>
-        <span className="tagline">Find where a number on your return comes from</span>
-        {hidden && (
-          <button type="button" className="files-summary" onClick={() => setLayout({ sidebarHidden: false })} title="Show files and groups">
-            {plural(s.files.length, 'file')} · {plural(s.groups.length, 'group')}
-          </button>
-        )}
+        <nav className="steps" aria-label="Steps">
+          {steps.map(st => (
+            <button key={st.view} type="button" className={`step-tab${s.view === st.view ? ' on' : ''}`} aria-current={s.view === st.view ? 'page' : undefined} onClick={() => setView(st.view)}>
+              <span className="step">{st.n}</span> {st.label}
+              {st.count && <span className="count">{st.count}</span>}
+            </button>
+          ))}
+        </nav>
         <span className="local-badge" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
           <IconLock size={14} stroke={2} aria-hidden /> Files stay on this computer
         </span>
       </header>
 
-      <div className="workspace">
-        {!hidden && (
-          <aside className="sidebar" aria-label="Files and groups">
-            <FilesPanel />
-            <GroupsPanel />
-          </aside>
-        )}
-        <div className="col-wrap">
-          <main className="main" ref={main}>
-            <FindCard />
-            <RunList />
-            <Results />
-          </main>
-          <ScrollRail target={main} />
+      <FindBar />
+
+      {s.view === 'files' && <FilesView />}
+      {s.view === 'groups' && <GroupsView />}
+      {s.view === 'find' && (
+        <div className="workspace">
+          <div className="col-wrap">
+            <main className="main" ref={main}>
+              <RunList />
+              <Results />
+            </main>
+            <ScrollRail target={main} />
+          </div>
+          <SidePane />
         </div>
-        <SidePane />
-      </div>
+      )}
 
       <NoticeBar />
       {s.dragging && (

@@ -1,7 +1,7 @@
 // Small pieces shared by the check table (CheckResults) and its detail in the side pane (SidePane).
 
 import type { ReactNode } from 'react';
-import { amountIndex, type CheckRow, type CheckRun } from '../state/store';
+import { amountIndex, fileLabel, type CheckRow, type CheckRun } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
 import { diffPhrase, formatMoney, locationShort } from '../lib/format';
 import type { NearMiss } from '../lib/nearmiss';
@@ -32,24 +32,16 @@ export function Ev({ amount, children }: { amount: Amount; children: ReactNode }
   return <span className={`ev${link}`} {...hoverProps(amount)}>{children}</span>;
 }
 
-export function MatchText({ match }: { match: Match }) {
-  const idx = amountIndex();
+/** A single found number, in full: "INT · page 1 · 1 Interest income · 3,234.56". */
+export function SingleText({ match }: { match: Match }) {
+  const it = match.items[0];
+  const h = amountIndex().get(it.id);
+  if (!h) return null;
   return (
-    <span className="match-text">
-      {match.items.map((it, i) => {
-        const h = idx.get(it.id);
-        if (!h) return null;
-        return (
-          <span key={it.id}>
-            {i > 0 && <span className="op">{it.sign === -1 ? ' − ' : ' + '}</span>}
-            {i === 0 && it.sign === -1 && <span className="op">− </span>}
-            <Ev amount={h.amount}>
-              {h.file.name} · {locationShort(h.amount)}{match.items.length === 1 && h.amount.label ? ` · ${h.amount.label}` : ''} · <span className="num">{formatMoney(h.amount.value, h.amount.decimals)}</span>
-            </Ev>
-          </span>
-        );
-      })}
-    </span>
+    <Ev amount={h.amount}>
+      {h.file.name !== fileLabel(h.file) ? <span title={h.file.name}>{fileLabel(h.file)}</span> : h.file.name} · {locationShort(h.amount)}
+      {h.amount.label ? ` · ${h.amount.label}` : ''} · <span className="num">{formatMoney(h.amount.value, h.amount.decimals)}</span>
+    </Ev>
   );
 }
 
@@ -59,7 +51,9 @@ export function NearText({ near, target, decimals }: { near: NearMiss<Amount>; t
   return (
     <span className="muted">
       {near.transposed ? <span className="pill typo">Two digits swapped?</span> : 'Close:'}{' '}
-      <Ev amount={h.amount}>{h.file.name} · {h.amount.label || locationShort(h.amount)} · {formatMoney(near.value, h.amount.decimals)}</Ev> ({diffPhrase(near.diff, target, decimals)})
+      <Ev amount={h.amount}>{fileLabel(h.file)} · {h.amount.label || locationShort(h.amount)} · {formatMoney(near.value, h.amount.decimals)}</Ev> ({diffPhrase(near.diff, target, decimals)})
     </span>
   );
 }
+
+export const formatTime = (at: number) => new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
