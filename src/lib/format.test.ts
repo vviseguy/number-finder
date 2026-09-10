@@ -1,0 +1,65 @@
+import { describe, expect, test } from 'vitest';
+import { decimalsOf, describeLimit, diffPhrase, formatMoney, locationShort, parseAmountInput, parseLimit } from './format';
+import type { Amount } from '../types';
+
+describe('parseAmountInput', () => {
+  test.each([
+    ['3,235', 3235],
+    ['$3,234.56', 3234.56],
+    ['(75.00)', -75],
+    ['75.00-', -75],
+    ['-265.44', -265.44],
+    [' 1 234.5 ', 1234.5],
+    ['.5', 0.5],
+  ])('%s → %d', (text, value) => expect(parseAmountInput(text)).toBe(value));
+
+  test.each(['', 'abc', '1.2.3', '--5', '()'])('rejects %j', text => expect(parseAmountInput(text)).toBeNull());
+});
+
+test('decimalsOf', () => {
+  expect(decimalsOf('3,235')).toBe(0);
+  expect(decimalsOf('3,234.56')).toBe(2);
+});
+
+describe('parseLimit (per-file limit in a group)', () => {
+  test('blank and any mean no limit', () => {
+    expect(parseLimit('')).toEqual({ min: 0, max: null });
+    expect(parseLimit('any')).toEqual({ min: 0, max: null });
+  });
+  test('a single number is a maximum, not an exact count', () => expect(parseLimit('1')).toEqual({ min: 0, max: 1 }));
+  test('ranges and minimums', () => {
+    expect(parseLimit('1-2')).toEqual({ min: 1, max: 2 });
+    expect(parseLimit('0 to 3')).toEqual({ min: 0, max: 3 });
+    expect(parseLimit('2+')).toEqual({ min: 2, max: null });
+  });
+  test('rejects nonsense', () => {
+    expect(parseLimit('3-1')).toBeNull();
+    expect(parseLimit('lots')).toBeNull();
+  });
+  test('describeLimit reads naturally', () => {
+    expect(describeLimit('')).toBe('any');
+    expect(describeLimit('1')).toBe('max 1');
+    expect(describeLimit('1-2')).toBe('1–2');
+    expect(describeLimit('2+')).toBe('at least 2');
+    expect(describeLimit('x')).toBe('invalid');
+  });
+});
+
+test('formatMoney uses a true minus and respects whole dollars', () => {
+  expect(formatMoney(3234.56)).toBe('3,234.56');
+  expect(formatMoney(3235, 0)).toBe('3,235');
+  expect(formatMoney(-265.44)).toBe('−265.44');
+  expect(formatMoney(0.1 + 0.2)).toBe('0.30');
+});
+
+test('diffPhrase explains how far off the nearest number is', () => {
+  expect(diffPhrase(-18, 9120, 0)).toBe('18.00 less than 9,120');
+  expect(diffPhrase(0.001, 5, 0)).toBe('same as 5');
+});
+
+test('locationShort', () => {
+  const base = { id: 'f:0', fileId: 'f', value: 1, text: '1', label: '', decimals: 0 };
+  expect(locationShort({ ...base, location: { kind: 'pdf', page: 2, box: [0, 0, 1, 1] } } as Amount)).toBe('page 2');
+  expect(locationShort({ ...base, location: { kind: 'sheet', sheet: 'Interest', cell: 'D9' } } as Amount)).toBe('Interest!D9');
+  expect(locationShort({ ...base, location: { kind: 'sheet', sheet: 'CSV', cell: 'C5' } } as Amount)).toBe('row 5');
+});
