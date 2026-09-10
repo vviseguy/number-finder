@@ -47,8 +47,8 @@ test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to who
   await expect(first).toContainText('1099-INT.pdf');
   await expect(first).toContainText('3,234.56');
   await expect(first).toContainText('rounds to 3,235');
-  await expect(page.locator('.hotspot.hit')).toBeVisible();
-  await page.screenshot({ path: path.join(SHOTS, '02-lookup.png'), fullPage: true });
+  await expect(page.locator('.side-pane .hotspot.hit')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '02-lookup.png') });
 });
 
 test('sign flips: 3,234.56 is gross interest minus the early withdrawal penalty', async ({ page }) => {
@@ -63,19 +63,20 @@ test('sign flips: 3,234.56 is gross interest minus the early withdrawal penalty'
   await expect(combo).toContainText('3,500.00');
   await expect(combo).toContainText('−265.44');
   await expect(combo).toContainText('counted as negative');
-  await page.screenshot({ path: path.join(SHOTS, '03-flips.png'), fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, '03-flips.png') });
 });
 
-test('not found shows the nearest number: 9,120 withheld vs W-2 box 2 9,102.00', async ({ page }) => {
+test('not found shows the likely typo: 9,120 withheld vs W-2 box 2 9,102.00', async ({ page }) => {
   await open(page, SOURCES);
   await page.getByLabel('Rounding').first().selectOption('exact');
   await find(page, '9,120');
   const nf = page.locator('.not-found');
   await expect(nf).toContainText('Not found');
+  await expect(nf).toContainText('two digits swapped');
   await expect(nf).toContainText('W-2.pdf');
   await expect(nf).toContainText('9,102.00');
   await expect(nf).toContainText('18.00 less than 9,120');
-  await page.screenshot({ path: path.join(SHOTS, '04-not-found.png'), fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, '04-not-found.png') });
 });
 
 test('several searches run side by side', async ({ page }) => {
@@ -84,19 +85,68 @@ test('several searches run side by side', async ({ page }) => {
   for (const t of ['90,235', '3,235', '2,000', '85,000']) await find(page, t);
   await expect(page.locator('.search-row')).toHaveCount(4);
   await expect(page.locator('.search-row .status', { hasText: 'Running' })).toHaveCount(0, { timeout: 30_000 });
-  await page.screenshot({ path: path.join(SHOTS, '05-searches.png'), fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, '05-searches.png') });
 });
 
-test('check a group: the return against the source documents', async ({ page }) => {
+test('filters: -hours keeps hours out of the search', async ({ page }) => {
+  await open(page, ['payroll.xlsx', 'W-2.pdf']);
+  await page.getByLabel('Rounding').first().selectOption('exact');
+  await find(page, '2,080');
+  await expect(page.locator('.result-row').first()).toContainText('Hours');
+
+  await find(page, '2,080 -hours');
+  await expect(page.locator('.not-found')).toContainText('skipping “hours”');
+  await expect(page.locator('#find-input')).toHaveValue('-hours ');
+
+  await find(page, '85,000 -hours');
+  const rows = page.locator('.result-row');
+  await expect(rows.first()).toBeVisible();
+  for (const text of await rows.allInnerTexts()) expect(text).not.toContain('Hours');
+  await expect(page.locator('.search-row').first()).toContainText('skipping “hours”');
+  await page.screenshot({ path: path.join(SHOTS, '06-filters.png') });
+});
+
+test('hovering a result marks the same number everywhere', async ({ page }) => {
+  await open(page, SOURCES);
+  await page.getByLabel('Rounding').first().selectOption('exact');
+  await find(page, '3,234.56');
+  await expect(page.locator('.result-row')).toHaveCount(3);
+  await page.locator('.result-row').first().hover();
+  await expect(page.locator('.result-row.hovered')).toHaveCount(1);
+  await expect(page.locator('.result-row.linked')).toHaveCount(2);
+  await expect(page.locator('.col-wrap > .rail .mark')).toHaveCount(3);
+  await expect(page.locator('.side-pane .hotspot.linked, .side-pane .hotspot.hovered')).toHaveCount(1);
+  await expect(page.locator('.col-wrap > .rail-count')).toContainText('3 here');
+  await page.screenshot({ path: path.join(SHOTS, '07-hover-links.png') });
+  await page.mouse.move(5, 5);
+  await expect(page.locator('.result-row.linked')).toHaveCount(0);
+});
+
+test('files and groups can be hidden', async ({ page }) => {
+  await open(page, ['W-2.pdf']);
+  await expect(page.locator('.sidebar')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Hide files and groups' }).click();
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+  await expect(page.locator('.files-summary')).toContainText('1 file · 0 groups');
+  await page.reload();
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show files and groups' }).click();
+  await expect(page.locator('.sidebar')).toHaveCount(1);
+});
+
+test('check a group from the same box: the return against the source documents', async ({ page }) => {
   await open(page, [...SOURCES, ...RETURN]);
   await makeGroup(page, 'Source docs', SOURCES);
   await makeGroup(page, '2025 return', RETURN);
   await page.getByRole('button', { name: 'Check a group' }).click();
-  await page.getByLabel('Group to check').selectOption({ label: '2025 return' });
-  await page.getByLabel('Group to look in').selectOption({ label: 'Source docs' });
-  await page.getByRole('button', { name: 'Start check' }).click();
+  await page.getByRole('menuitem', { name: /2025 return/ }).click();
+  await expect(page.locator('.scope-chip')).toContainText('Every number in 2025 return');
+  await page.getByLabel('Group to search').selectOption({ label: 'Source docs' });
+  await page.getByLabel('Most numbers in a sum').first().fill('3');
+  await page.getByRole('button', { name: 'Check', exact: true }).click();
 
   await expect(page.locator('.progress-card')).toContainText('Checked', { timeout: 60_000 });
+  await expect(page.locator('.search-row').first()).toContainText('Every number in');
   const rows = page.locator('.tieout tbody tr');
   await expect(rows.first()).toContainText('Not found');
   const text = (await rows.allInnerTexts()).join('\n');
@@ -105,7 +155,13 @@ test('check a group: the return against the source documents', async ({ page }) 
   expect(text).toContain('Two digits swapped?');       // Schedule B 3,253 vs the 1099-INT's 3,235
   expect(text).toContain('Possible typo: 9,102.00');   // 9,120 withheld: a 3-number coincidence, but W-2 box 2 is 9,102
   expect(text).toContain('Nothing close');             // 410 tax-exempt interest has no source
-  await page.screenshot({ path: path.join(SHOTS, '06-check.png'), fullPage: true });
+  await expect(page.locator('.side-pane .detail')).toContainText('Not found');
+  await page.screenshot({ path: path.join(SHOTS, '08-check.png') });
+
+  // Hovering a piece of evidence in the table links its other uses and marks them in the rail.
+  await page.locator('.tieout .ev', { hasText: '85,000.00' }).first().hover();
+  await expect(page.locator('.tieout .ev.linked, .tieout .ev.hovered')).toHaveCount(2);
+  await page.mouse.move(5, 5);
 
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export to Excel' }).click()]);
   const saved = path.join(SHOTS, 'tieout.xlsx');
@@ -113,7 +169,7 @@ test('check a group: the return against the source documents', async ({ page }) 
   expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
 
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.screenshot({ path: path.join(SHOTS, '07-check-dark.png'), fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, '09-check-dark.png') });
 });
 
 test('setup is remembered, files are not', async ({ page }) => {

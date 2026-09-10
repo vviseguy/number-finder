@@ -1,19 +1,22 @@
-import { useEffect } from 'react';
-import { IconFileSearch, IconLock, IconUpload } from '@tabler/icons-react';
-import { addFiles, setDragging, useAppState } from '../state/store';
+import { useEffect, useRef } from 'react';
+import { IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLock, IconUpload } from '@tabler/icons-react';
+import { addFiles, setDragging, setLayout, useAppState } from '../state/store';
+import { plural } from '../lib/format';
 import { FilesPanel } from './FilesPanel';
 import { GroupsPanel } from './GroupsPanel';
 import { FindCard } from './FindCard';
-import { CheckSetup } from './CheckSetup';
-import { SearchList } from './SearchList';
+import { RunList } from './RunList';
 import { Results } from './Results';
-import { CheckView } from './CheckView';
+import { SidePane } from './SidePane';
 import { NoticeBar } from './NoticeBar';
+import { ScrollRail } from './ScrollRail';
 
 export function App() {
   const s = useAppState();
+  const hidden = s.layout.sidebarHidden;
+  const main = useRef<HTMLElement>(null);
 
-  // Files can be dropped anywhere on the page.
+  // Files can be dropped anywhere on the page, even with the files column hidden.
   useEffect(() => {
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
     const over = (e: DragEvent) => { if (hasFiles(e)) { e.preventDefault(); setDragging(true); } };
@@ -36,32 +39,48 @@ export function App() {
   }, []);
 
   return (
-    <div className="shell">
+    <div className={`shell${hidden ? ' no-sidebar' : ''}`}>
       <header className="topbar">
+        <button
+          type="button"
+          className="icon-btn sidebar-toggle"
+          aria-label={hidden ? 'Show files and groups' : 'Hide files and groups'}
+          title={hidden ? 'Show files and groups' : 'Hide files and groups'}
+          aria-expanded={!hidden}
+          onClick={() => setLayout({ sidebarHidden: !hidden })}
+        >
+          {hidden ? <IconLayoutSidebarLeftExpand size={18} stroke={1.75} /> : <IconLayoutSidebarLeftCollapse size={18} stroke={1.75} />}
+        </button>
         <IconFileSearch className="brand-icon" size={20} stroke={1.75} aria-hidden />
         <h1>Number finder</h1>
         <span className="tagline">Find where a number on your return comes from</span>
+        {hidden && (
+          <button type="button" className="files-summary" onClick={() => setLayout({ sidebarHidden: false })} title="Show files and groups">
+            {plural(s.files.length, 'file')} · {plural(s.groups.length, 'group')}
+          </button>
+        )}
         <span className="local-badge" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
           <IconLock size={14} stroke={2} aria-hidden /> Files stay on this computer
         </span>
       </header>
 
-      {s.view === 'check' && s.check ? (
-        <CheckView />
-      ) : (
-        <div className="workspace">
+      <div className="workspace">
+        {!hidden && (
           <aside className="sidebar" aria-label="Files and groups">
             <FilesPanel />
             <GroupsPanel />
           </aside>
-          <main className="main">
+        )}
+        <div className="col-wrap">
+          <main className="main" ref={main}>
             <FindCard />
-            {s.checkSetupOpen && <CheckSetup />}
-            <SearchList />
+            <RunList />
             <Results />
           </main>
+          <ScrollRail target={main} />
         </div>
-      )}
+        <SidePane />
+      </div>
 
       <NoticeBar />
       {s.dragging && (

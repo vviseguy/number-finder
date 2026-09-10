@@ -3,9 +3,11 @@ import { IconChevronLeft, IconChevronRight, IconEye } from '@tabler/icons-react'
 import * as XLSX from 'xlsx';
 import type { PageViewport } from 'pdfjs-dist';
 import { amountIndex, fileData, searchForAmount, useAppState, type FileEntry } from '../state/store';
+import { hoverProps, useLinkClass } from '../state/hover';
 import { locationShort } from '../lib/format';
 import { loadPdf } from '../lib/pdf';
 import type { Amount } from '../types';
+import { ScrollRail } from './ScrollRail';
 
 interface PreviewProps {
   amountId: string;
@@ -17,6 +19,7 @@ interface PreviewProps {
 
 export function Preview({ amountId, navIds = [], navNoun = 'Match', onNavigate }: PreviewProps) {
   const s = useAppState();
+  const body = useRef<HTMLDivElement>(null);
   const hit = amountIndex(s).get(amountId);
   if (!hit) return null;
   const { amount, file } = hit;
@@ -35,12 +38,15 @@ export function Preview({ amountId, navIds = [], navNoun = 'Match', onNavigate }
           </span>
         )}
       </div>
-      <div className="preview-body">
-        {amount.location.kind === 'pdf'
-          ? <PdfPage file={file} page={amount.location.page} highlight={amount} />
-          : <SheetWindow file={file} highlight={amount} />}
+      <div className="preview-body-wrap">
+        <div className="preview-body" ref={body}>
+          {amount.location.kind === 'pdf'
+            ? <PdfPage file={file} page={amount.location.page} highlight={amount} />
+            : <SheetWindow file={file} highlight={amount} />}
+        </div>
+        <ScrollRail target={body} />
       </div>
-      <p className="hint preview-foot">Click any number here to search for it.</p>
+      <p className="hint preview-foot">Click any number here to search for it. Hover one to see where else it appears.</p>
     </div>
   );
 }
@@ -120,20 +126,25 @@ function PdfPage({ file, page, highlight }: { file: FileEntry; page: number; hig
         const [x2, y2] = viewport.convertToViewportPoint(x + w, y + h) as [number, number];
         const style = { left: Math.min(x1, x2) - 2, top: Math.min(y1, y2) - 2, width: Math.abs(x2 - x1) + 4, height: Math.abs(y2 - y1) + 4 };
         const isHit = a.id === highlight.id;
-        return (
-          <button
-            key={a.id}
-            ref={isHit ? hitRef : undefined}
-            type="button"
-            className={`hotspot${isHit ? ' hit' : ''}`}
-            style={style}
-            title={`Search for ${a.text}${a.label ? ` (${a.label})` : ''}`}
-            aria-label={`Search for ${a.text}`}
-            onClick={() => searchForAmount(a.id)}
-          />
-        );
+        return <Hotspot key={a.id} amount={a} isHit={isHit} style={style} hitRef={isHit ? hitRef : undefined} />;
       })}
     </div>
+  );
+}
+
+function Hotspot({ amount: a, isHit, style, hitRef }: { amount: Amount; isHit: boolean; style: React.CSSProperties; hitRef?: React.RefObject<HTMLButtonElement | null> }) {
+  const link = useLinkClass(a);
+  return (
+    <button
+      ref={hitRef}
+      type="button"
+      className={`hotspot${isHit ? ' hit' : ''}${link}`}
+      style={style}
+      title={`Search for ${a.text}${a.label ? ` (${a.label})` : ''}`}
+      aria-label={`Search for ${a.text}`}
+      onClick={() => searchForAmount(a.id)}
+      {...hoverProps(a)}
+    />
   );
 }
 
@@ -181,16 +192,21 @@ function SheetWindow({ file, highlight }: { file: FileEntry; highlight: Amount }
                 const text = v ? (v.w ?? (v.v === undefined || v.v === null ? '' : String(v.v))) : '';
                 const a = amountsByCell.get(addr);
                 if (!a) return <td key={c} className={typeof v?.v === 'number' ? 'n' : ''}>{text}</td>;
-                return (
-                  <td key={c} className={`n${a.id === highlight.id ? ' hit' : ''}`}>
-                    <button type="button" className="cell-btn" title={`Search for ${a.text}`} onClick={() => searchForAmount(a.id)}>{text}</button>
-                  </td>
-                );
+                return <SheetCell key={c} amount={a} text={text} isHit={a.id === highlight.id} />;
               })}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function SheetCell({ amount: a, text, isHit }: { amount: Amount; text: string; isHit: boolean }) {
+  const link = useLinkClass(a);
+  return (
+    <td className={`n${isHit ? ' hit' : ''}${link}`} {...hoverProps(a)}>
+      <button type="button" className="cell-btn" title={`Search for ${a.text}`} onClick={() => searchForAmount(a.id)}>{text}</button>
+    </td>
   );
 }

@@ -25,7 +25,13 @@ Between sessions it remembers your **setup** — group names, which file names b
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
    - **Also try negatives:** any number may count as negative.
 
-   Searches run side by side; each shows its progress and can be stopped.
+   **Filters.** Add words to the box the way you would in a search engine: `3,235 -hours` skips every number whose label, column, sheet, or file name mentions "hours"; `3,235 interest` searches only numbers that mention "interest"; quotes keep a phrase together (`-"hourly rate"`). Filters apply before the search, so a skipped number can never be part of a sum, and they stay in the box for your next number.
+
+   **Check a group.** Press *Check a group* in the box and pick a group: instead of one number, every number in that group is looked up in the group you're searching in, with the same Match, Rounding, and filter settings. The result is a table of what was found, what's made of several numbers, and what's missing.
+
+   Searches and checks run side by side in one list; each shows its progress and can be stopped. The pane on the right shows the selected number in its file. Hover any number, in the results or in a file, to light up every other place the same value appears; the yellow marks along the scrollbars show where those places are.
+
+   The files-and-groups column can be hidden with the button at the top left; dropping files anywhere on the page still adds them.
 
 **What counts as a number:** amounts like `85,000.00`, `$3,234.56`, `(265.44)`, `3,235`. Years, box and line labels (`1`, `2a`, `25a`), form names (`Form 1040`), SSNs, EINs, ZIP codes, dates, percentages, and long account numbers are skipped. Open a file's preview to see exactly which numbers were picked up — each one is clickable.
 
@@ -51,7 +57,7 @@ npm test
 npm run build
 ```
 
-`npm run build` writes the single self-contained file to `dist/numberfinder.html`. `npm run e2e` runs the browser tests against that built file in Microsoft Edge and saves screenshots to `test-results/shots/`. `node scripts/make-fixtures.mjs` regenerates the fake tax documents in `fixtures/` used by the tests.
+`npm run build` writes the single self-contained file to `dist/numberfinder.html`. `npm run e2e` runs the browser tests against that built file in Microsoft Edge and saves screenshots to `test-results/shots/`. `node scripts/make-fixtures.mjs` and `node scripts/make-payroll-fixture.mjs` regenerate the fake tax documents in `fixtures/` used by the tests.
 
 | Path | What |
 | --- | --- |

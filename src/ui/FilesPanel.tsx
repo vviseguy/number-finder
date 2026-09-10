@@ -14,6 +14,7 @@ export function FilesPanel() {
   const loaded = new Set(s.files.map(f => f.key));
   const missing = [...new Map(s.groups.flatMap(g => g.members).filter(m => !loaded.has(m.key)).map(m => [m.key, m])).values()];
   const empty = !s.files.length && !missing.length;
+  const choose = () => input.current?.click();
 
   return (
     <section className="panel" aria-labelledby="h-files">
@@ -68,20 +69,27 @@ export function FilesPanel() {
         </ul>
       )}
 
-      <div className={`dropzone${empty ? ' first-run' : ''}`}>
-        <IconUpload size={empty ? 22 : 16} stroke={1.5} aria-hidden />
-        <span>{empty ? 'Drop your tax documents here' : 'Drop PDF, Excel, or CSV files here'}</span>
-        {empty && <span className="hint">PDFs, Excel workbooks, and CSV files. They're read inside this page and never uploaded.</span>}
-        <button type="button" className="btn sm" onClick={() => input.current?.click()}>Choose files</button>
-        <input
-          ref={input}
-          type="file"
-          multiple
-          accept={ACCEPT}
-          hidden
-          onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; if (files.length) void addFiles(files); }}
-        />
-      </div>
+      {empty ? (
+        <div className="dropzone first-run">
+          <IconUpload size={22} stroke={1.5} aria-hidden />
+          <span>Drop your tax documents here</span>
+          <span className="hint">PDFs, Excel workbooks, and CSV files. They're read inside this page and never uploaded.</span>
+          <button type="button" className="btn sm" onClick={choose}>Choose files</button>
+        </div>
+      ) : (
+        <p className="dropzone compact">
+          <IconUpload size={14} stroke={1.75} aria-hidden />
+          <span>Drop more files anywhere, or <button type="button" className="link" onClick={choose}>choose files</button></span>
+        </p>
+      )}
+      <input
+        ref={input}
+        type="file"
+        multiple
+        accept={ACCEPT}
+        hidden
+        onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; if (files.length) void addFiles(files); }}
+      />
     </section>
   );
 }

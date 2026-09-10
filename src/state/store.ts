@@ -3,20 +3,25 @@
 // Contracts:
 //   - File bytes live outside the state (fileData) so the state stays small and serializable.
 //   - Groups reference files by key ("name|size"), so a re-dropped file slots back into its groups.
-//   - Only SETUP is saved between sessions (groups, find settings, search definitions) — never file
+//   - Only SETUP is saved between sessions (groups, find settings, layout, run definitions) — never file
 //     contents, amounts, or results.
+//   - One find box serves both jobs: a number ("what makes 3,235") or, with a group picked, every number
+//     in that group. Both become a Run in one list. Filter words (-hours) narrow what's searched and what's
+//     checked, before the search runs.
 
 import { useSyncExternalStore } from 'react';
-import type { Amount, DoneReason, EngineEvent, FileLimit, Match, Nearest, ParsedFile, Rounding, SearchRequest } from '../types';
+import type { Amount, DoneReason, EngineEvent, FileLimit, Match, ParsedFile, Rounding, SearchRequest } from '../types';
 import { ROUNDING_TOLERANCE } from '../types';
 import { extractFile } from '../extract';
 import { SearchPool } from '../engine/pool';
 import { forgetPdf, getPdfjs } from '../lib/pdf';
-import { decimalsOf, formatMoney, madeOfLabel, parseAmountInput, parseLimit, ROUNDING_SHORT, uid } from '../lib/format';
+import { madeOfLabel, parseLimit, ROUNDING_SHORT, uid } from '../lib/format';
+import { hasTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, type Terms } from '../lib/query';
 
 export const ALL_FILES = '__all__';
-const STORAGE_KEY = 'number-finder:setup:v1';
+const STORAGE_KEY = 'number-finder:setup:v2';
 const GROUP_COLORS = 6;
+const READ_TIMEOUT_MS = 60_000;
 
 // ---------- state shape ----------
 
@@ -34,64 +39,68 @@ export interface FileEntry {
 export interface GroupMember { key: string; name: string; limit: string }
 export interface Group { id: string; name: string; color: number; members: GroupMember[] }
 
+/** groupId is the group searched IN. */
 export interface FindSettings { groupId: string; maxCount: number | null; rounding: Rounding; allowFlips: boolean }
 
-export interface SearchRun {
-  id: string;
+type RunStatus = 'idle' | 'running' | 'done' | 'stopped';
+interface RunBase { id: string; settings: FindSettings; terms: Terms; status: RunStatus; startedAt: number; elapsedMs: number }
+
+export interface SearchRun extends RunBase {
+  kind: 'search';
   target: number;
   targetDecimals: number;
   originId: string | null;
-  settings: FindSettings;
-  status: 'idle' | 'running' | 'done';
   reason: DoneReason | null;
   detail?: string;
   matches: Match[];
-  nearest: Nearest | null;
   progress: number | null;
-  startedAt: number;
-  elapsedMs: number;
 }
 
 export type RowStatus = 'pending' | 'found' | 'combo' | 'notfound';
-export interface CheckRow { amountId: string; status: RowStatus; matches: Match[]; nearest: Nearest | null }
-export interface CheckRun {
-  id: string;
+export interface CheckRow { amountId: string; status: RowStatus; matches: Match[] }
+
+export interface CheckRun extends RunBase {
+  kind: 'check';
+  /** The group whose every number is checked (against settings.groupId). */
   checkGroupId: string;
-  againstGroupId: string;
-  settings: Omit<FindSettings, 'groupId'>;
   rows: CheckRow[];
-  status: 'running' | 'done' | 'stopped';
   skippedZeros: number;
+  skippedByTerms: number;
+  selectedAmountId: string | null;
 }
 
+export type Run = SearchRun | CheckRun;
+
 export interface Notice { kind: 'info' | 'warn' | 'error'; text: string; action?: { label: string; run: () => void } }
+export interface Layout { sidebarHidden: boolean }
 
 export interface AppState {
   files: FileEntry[];
   groups: Group[];
   find: FindSettings;
-  /** What's typed in the find box (not saved). */
+  /** What's typed in the find box: a number and/or filter words. */
   findText: string;
-  searches: SearchRun[];
-  selectedSearchId: string | null;
-  /** Amount shown in the preview. */
+  /** With a group picked, the box checks every number in it instead of one number. */
+  scopeGroupId: string | null;
+  runs: Run[];
+  selectedRunId: string | null;
+  /** Amount shown in the side pane. */
   previewId: string | null;
-  view: 'workspace' | 'check';
-  check: CheckRun | null;
-  checkSetupOpen: boolean;
   notice: Notice | null;
   dragging: boolean;
+  layout: Layout;
 }
 
 // ---------- store plumbing ----------
 
 export const fileData = new Map<string, ArrayBuffer>();
 const listeners = new Set<() => void>();
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let state: AppState = loadSetup();
 let emitQueued = false;
-let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 let pool: SearchPool | null = null;
+/** Running engine searches: a search run's id, or `${checkRunId}:${amountId}` for one check row. */
 const handles = new Map<string, { stop(): void }>();
 
 const getPool = () => (pool ??= new SearchPool());
@@ -120,37 +129,55 @@ export function useAppState(): AppState {
 
 // ---------- persistence (setup only) ----------
 
-interface SavedSetup {
-  groups: Group[];
-  find: FindSettings;
-  searches: { target: number; targetDecimals: number; settings: FindSettings }[];
-}
+type SavedRun =
+  | { kind: 'search'; target: number; targetDecimals: number; settings: FindSettings; terms: Terms }
+  | { kind: 'check'; checkGroupId: string; settings: FindSettings; terms: Terms };
 
+interface SavedSetup { groups: Group[]; find: FindSettings; scopeGroupId: string | null; layout: Layout; runs: SavedRun[] }
+
+// A function declaration, not a const: loadSetup() runs at module load, before consts below it exist.
 function defaultFind(): FindSettings {
   return { groupId: ALL_FILES, maxCount: 1, rounding: 'dollar', allowFlips: false };
 }
 
+function restoreRun(r: SavedRun): Run {
+  const base = { settings: r.settings, terms: r.terms ?? { include: [], exclude: [] }, status: 'idle' as const, startedAt: 0, elapsedMs: 0 };
+  return r.kind === 'check'
+    ? { ...base, kind: 'check', id: uid('c'), checkGroupId: r.checkGroupId, rows: [], skippedZeros: 0, skippedByTerms: 0, selectedAmountId: null }
+    : { ...base, kind: 'search', id: uid('s'), target: r.target, targetDecimals: r.targetDecimals, originId: null, reason: null, matches: [], progress: null };
+}
+
 function loadSetup(): AppState {
   const base: AppState = {
-    files: [], groups: [], find: defaultFind(), findText: '', searches: [], selectedSearchId: null, previewId: null,
-    view: 'workspace', check: null, checkSetupOpen: false, notice: null, dragging: false,
+    files: [], groups: [], find: defaultFind(), findText: '', scopeGroupId: null, runs: [], selectedRunId: null,
+    previewId: null, notice: null, dragging: false, layout: { sidebarHidden: false },
   };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
     const saved = JSON.parse(raw) as SavedSetup;
-    const searches: SearchRun[] = (saved.searches || []).map(s => ({
-      id: uid('s'), target: s.target, targetDecimals: s.targetDecimals, originId: null, settings: s.settings,
-      status: 'idle', reason: null, matches: [], nearest: null, progress: null, startedAt: 0, elapsedMs: 0,
-    }));
-    return { ...base, groups: saved.groups || [], find: { ...defaultFind(), ...saved.find }, searches };
+    return {
+      ...base,
+      groups: saved.groups ?? [],
+      find: { ...defaultFind(), ...saved.find },
+      scopeGroupId: saved.scopeGroupId ?? null,
+      layout: { ...base.layout, ...saved.layout },
+      runs: (saved.runs ?? []).map(restoreRun),
+    };
   } catch {
     return base;
   }
 }
 
-// Saves are debounced; flush the pending one when the page is closed, reloaded, or hidden so a change
-// made just before leaving isn't lost.
+function saveSetup() {
+  const runs: SavedRun[] = state.runs.slice(0, 30).map(r => (r.kind === 'check'
+    ? { kind: 'check', checkGroupId: r.checkGroupId, settings: r.settings, terms: r.terms }
+    : { kind: 'search', target: r.target, targetDecimals: r.targetDecimals, settings: r.settings, terms: r.terms }));
+  const saved: SavedSetup = { groups: state.groups, find: state.find, scopeGroupId: state.scopeGroupId, layout: state.layout, runs };
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch { /* storage full or blocked: setup just isn't remembered */ }
+}
+
+// Saves are debounced; flush the pending one when the page is closed, reloaded, or hidden.
 function flushSetup() {
   if (persistTimer === undefined) return;
   clearTimeout(persistTimer);
@@ -160,15 +187,6 @@ function flushSetup() {
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', flushSetup);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSetup(); });
-}
-
-function saveSetup() {
-  const saved: SavedSetup = {
-    groups: state.groups,
-    find: state.find,
-    searches: state.searches.slice(0, 30).map(s => ({ target: s.target, targetDecimals: s.targetDecimals, settings: s.settings })),
-  };
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch { /* storage full or blocked: setup just isn't remembered */ }
 }
 
 // ---------- derived data ----------
@@ -185,8 +203,8 @@ export function amountIndex(s: AppState = state): Map<string, { amount: Amount; 
   return indexCache.map;
 }
 
-export function groupById(s: AppState, id: string): Group | undefined {
-  return s.groups.find(g => g.id === id);
+export function groupById(s: AppState, id: string | null): Group | undefined {
+  return id ? s.groups.find(g => g.id === id) : undefined;
 }
 
 export function groupName(s: AppState, id: string): string {
@@ -214,11 +232,12 @@ export function groupsOfFile(s: AppState, key: string): Group[] {
   return s.groups.filter(g => g.members.some(m => m.key === key));
 }
 
-export function settingsSummary(s: AppState, settings: Omit<FindSettings, 'groupId'> & { groupId?: string }): string {
-  const parts = [];
-  if (settings.groupId) parts.push(`in ${groupName(s, settings.groupId)}`);
-  parts.push(madeOfLabel(settings.maxCount), ROUNDING_SHORT[settings.rounding]);
-  if (settings.allowFlips) parts.push('negatives');
+/** "in Source docs · sums of up to 3 · whole dollars · negatives · skipping “hours”" */
+export function runSummary(s: AppState, r: { settings: FindSettings; terms: Terms }): string {
+  const parts = [`in ${groupName(s, r.settings.groupId)}`, madeOfLabel(r.settings.maxCount), ROUNDING_SHORT[r.settings.rounding]];
+  if (r.settings.allowFlips) parts.push('negatives');
+  const t = termsPhrase(r.terms);
+  if (t) parts.push(t);
   return parts.join(' · ');
 }
 
@@ -231,12 +250,15 @@ export function notify(kind: Notice['kind'], text: string, action?: Notice['acti
 }
 export function dismissNotice() { clearTimeout(noticeTimer); set({ notice: null }); }
 
+// ---------- layout ----------
+
+export function setLayout(patch: Partial<Layout>) { set(s => ({ layout: { ...s.layout, ...patch } })); }
+
 // ---------- files ----------
 
 const fileKey = (f: { name: string; size: number }) => `${f.name}|${f.size}`;
 
 /** A file that never finishes reading must say so instead of showing "Reading…" forever. */
-const READ_TIMEOUT_MS = 60_000;
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout')), ms);
@@ -310,6 +332,7 @@ export function deleteGroup(id: string) {
   set(s => ({
     groups: s.groups.filter(x => x.id !== id),
     find: s.find.groupId === id ? { ...s.find, groupId: ALL_FILES } : s.find,
+    scopeGroupId: s.scopeGroupId === id ? null : s.scopeGroupId,
   }));
   notify('info', `Deleted ${g.name}.`, {
     label: 'Undo',
@@ -337,43 +360,71 @@ export function setLimit(groupId: string, key: string, limit: string) {
   }));
 }
 
-// ---------- single searches ----------
+// ---------- the find box ----------
 
 export function setFind(patch: Partial<FindSettings>) { set(s => ({ find: { ...s.find, ...patch } })); }
 export function setFindText(findText: string) { set({ findText }); }
+export function setScope(scopeGroupId: string | null) { set({ scopeGroupId }); }
 
-/** From a not-found result: widen the settings and search the same number again. */
-export function retryWith(target: number, decimals: number, originId: string | null, patch: Partial<FindSettings>) {
-  setFind(patch);
-  set({ view: 'workspace' });
-  runSearch(formatMoney(target, decimals).replace('−', '-'), originId);
+function currentSettings(): FindSettings {
+  const g = state.find.groupId;
+  return { ...state.find, groupId: g === ALL_FILES || groupById(state, g) ? g : ALL_FILES };
+}
+
+/** Enter in the find box: search for the typed number, or check every number in the picked group. */
+export function submitFind(): boolean {
+  const q = parseQuery(state.findText);
+  if (q.extraNumbers.length) {
+    notify('error', 'Search for one number at a time. To look up many numbers, pick a group with Check a group.');
+    return false;
+  }
+  const settings = currentSettings();
+  if (state.scopeGroupId) {
+    if (q.value !== null) {
+      notify('warn', `A group is picked, so the box only takes filters. Remove the group to search for ${q.valueText}.`);
+      return false;
+    }
+    return startCheck(state.scopeGroupId, settings, q.terms);
+  }
+  if (q.value === null) {
+    notify('error', 'Type a number to find, like 3,235, or use Check a group to look up every number in a group.');
+    return false;
+  }
+  const ok = runSearch(q.value, q.decimals, q.terms, null, settings);
+  // Filters stay in the box for the next number.
+  if (ok) { const rest = serializeTerms(q.terms); set({ findText: rest ? `${rest} ` : '' }); }
+  return ok;
 }
 
 function buildRequest(
   s: AppState,
-  groupId: string,
-  settings: Omit<FindSettings, 'groupId'>,
+  settings: FindSettings,
   target: number,
   exclude: string | null,
+  terms: Terms,
   budget: { maxResults: number; timeLimitMs: number },
 ): SearchRequest | string {
-  const members = groupFiles(s, groupId);
+  const members = groupFiles(s, settings.groupId);
   if (!members.length) {
-    return groupId === ALL_FILES ? 'Add some files first.' : `${groupName(s, groupId)} has no files yet. Add files to it first.`;
+    return settings.groupId === ALL_FILES ? 'Add some files first.' : `${groupName(s, settings.groupId)} has no files loaded yet. Add files to it first.`;
   }
   const limits: Record<string, FileLimit> = {};
   for (const m of members) {
     if (m.limit === null) {
-      const member = groupById(s, groupId)?.members.find(x => x.key === m.file.key);
+      const member = groupById(s, settings.groupId)?.members.find(x => x.key === m.file.key);
       if (member) return `The limit for ${member.name} should be like 1, 0-2, or any.`;
       continue;
     }
     if (m.limit.min > 0 || m.limit.max !== null) limits[m.file.id] = m.limit;
   }
   const candidates = members.flatMap(m => (m.file.parsed?.amounts ?? [])
-    .filter(a => a.id !== exclude)
+    .filter(a => a.id !== exclude && passesTerms(a, m.file.name, terms))
     .map(a => ({ id: a.id, fileId: a.fileId, value: a.value })));
-  if (!candidates.length) return `There are no numbers in ${groupName(s, groupId)} to search.`;
+  if (!candidates.length) {
+    return hasTerms(terms)
+      ? `No numbers in ${groupName(s, settings.groupId)} are left after the filters (${termsPhrase(terms)}).`
+      : `There are no numbers in ${groupName(s, settings.groupId)} to search.`;
+  }
   return {
     target,
     maxCount: settings.maxCount,
@@ -385,132 +436,178 @@ function buildRequest(
   };
 }
 
-/** Start a search. text: what the user typed (or the clicked amount's text). */
-export function runSearch(text: string, originId: string | null = null): boolean {
-  const target = parseAmountInput(text);
-  if (target === null) { notify('error', 'Type a number to find, like 3,235 or 3,234.56.'); return false; }
-  const settings = { ...state.find, groupId: groupById(state, state.find.groupId) ? state.find.groupId : ALL_FILES };
-  const request = buildRequest(state, settings.groupId, settings, target, originId, { maxResults: 50, timeLimitMs: 10_000 });
+// ---------- single searches ----------
+
+const SEARCH_BUDGET = { maxResults: 50, timeLimitMs: 10_000 };
+
+export function runSearch(target: number, decimals: number, terms: Terms, originId: string | null, settings: FindSettings = currentSettings()): boolean {
+  const request = buildRequest(state, settings, target, originId, terms, SEARCH_BUDGET);
   if (typeof request === 'string') { notify('warn', request); return false; }
   const run: SearchRun = {
-    id: uid('s'), target, targetDecimals: decimalsOf(text), originId, settings, status: 'running', reason: null,
-    matches: [], nearest: null, progress: 0, startedAt: performance.now(), elapsedMs: 0,
+    kind: 'search', id: uid('s'), target, targetDecimals: decimals, originId, settings, terms, status: 'running', reason: null,
+    matches: [], progress: 0, startedAt: performance.now(), elapsedMs: 0,
   };
-  set(s => ({ searches: [run, ...s.searches], selectedSearchId: run.id, previewId: null }));
-  start(run.id, request);
+  set(s => ({ runs: [run, ...s.runs], selectedRunId: run.id, previewId: null }));
+  startSearch(run.id, request);
   return true;
 }
 
-function start(id: string, request: SearchRequest) {
+function startSearch(id: string, request: SearchRequest) {
   handles.set(id, getPool().run(request, ev => onSearchEvent(id, ev)));
 }
 
-function patchSearch(id: string, fn: (r: SearchRun) => Partial<SearchRun>) {
-  set(s => ({ searches: s.searches.map(r => (r.id === id ? { ...r, ...fn(r) } : r)) }));
+function patchRun(id: string, fn: (r: Run) => Partial<SearchRun> | Partial<CheckRun>) {
+  set(s => ({ runs: s.runs.map(r => (r.id === id ? ({ ...r, ...fn(r) } as Run) : r)) }));
 }
 
 function onSearchEvent(id: string, ev: EngineEvent) {
   if (ev.type === 'progress') {
-    patchSearch(id, () => ({ progress: ev.fraction, elapsedMs: ev.elapsedMs }));
+    patchRun(id, () => ({ progress: ev.fraction, elapsedMs: ev.elapsedMs }));
   } else if (ev.type === 'match') {
-    patchSearch(id, r => ({ matches: [...r.matches, ev.match] }));
+    patchRun(id, r => ({ matches: [...(r as SearchRun).matches, ev.match] }));
   } else {
     handles.delete(id);
-    patchSearch(id, r => ({
-      status: 'done', reason: ev.reason, detail: ev.detail, matches: ev.matches, nearest: ev.nearest,
-      progress: 1, elapsedMs: performance.now() - r.startedAt,
+    patchRun(id, r => ({
+      status: 'done', reason: ev.reason, detail: ev.detail, matches: ev.matches, progress: 1, elapsedMs: performance.now() - r.startedAt,
     }));
-    const r = state.searches.find(x => x.id === id);
-    if (r && state.selectedSearchId === id && !state.previewId && r.matches[0]) set({ previewId: r.matches[0].items[0].id });
+    const r = state.runs.find(x => x.id === id);
+    if (r?.kind === 'search' && state.selectedRunId === id && !state.previewId && r.matches[0]) set({ previewId: r.matches[0].items[0].id });
   }
 }
 
-export function stopSearch(id: string) { handles.get(id)?.stop(); }
+/** Clicking a number in a preview: search for it with the current settings and filters. */
+export function searchForAmount(amountId: string) {
+  const hit = amountIndex().get(amountId);
+  if (!hit) return;
+  runSearch(hit.amount.value, hit.amount.decimals, parseQuery(state.findText).terms, amountId);
+}
 
-export function removeSearch(id: string) {
-  handles.get(id)?.stop();
+/** From a miss: widen the settings and search the same number again. */
+export function retryWith(target: number, decimals: number, originId: string | null, terms: Terms, patch: Partial<FindSettings>) {
+  setFind(patch);
+  runSearch(target, decimals, terms, originId);
+}
+
+// ---------- checking every number in a group ----------
+
+export function startCheck(checkGroupId: string, settings: FindSettings, terms: Terms): boolean {
+  if (checkGroupId === settings.groupId) {
+    notify('warn', `Checking ${groupName(state, checkGroupId)} against itself would find every number in itself. Pick a different group to look in.`);
+    return false;
+  }
+  const run: CheckRun = {
+    kind: 'check', id: uid('c'), checkGroupId, settings, terms, status: 'running', rows: [], skippedZeros: 0, skippedByTerms: 0,
+    selectedAmountId: null, startedAt: performance.now(), elapsedMs: 0,
+  };
+  return launchCheck(run, true);
+}
+
+function launchCheck(base: CheckRun, isNew: boolean): boolean {
+  const checked = groupFiles(state, base.checkGroupId);
+  if (!checked.length) { notify('warn', `${groupName(state, base.checkGroupId)} has no files loaded yet.`); return false; }
+  const all = checked.flatMap(m => (m.file.parsed?.amounts ?? []).map(a => ({ a, fileName: m.file.name })));
+  const kept = all.filter(x => passesTerms(x.a, x.fileName, base.terms)).map(x => x.a);
+  const nonZero = kept.filter(a => Math.abs(a.value) >= 0.005);
+  if (!nonZero.length) {
+    notify('warn', `There are no numbers to check in ${groupName(state, base.checkGroupId)}${hasTerms(base.terms) ? ' after the filters' : ''}.`);
+    return false;
+  }
+  const probe = buildRequest(state, base.settings, 1, null, base.terms, { maxResults: 1, timeLimitMs: 1 });
+  if (typeof probe === 'string') { notify('warn', probe); return false; }
+
+  const run: CheckRun = {
+    ...base,
+    status: 'running',
+    rows: nonZero.map(a => ({ amountId: a.id, status: 'pending', matches: [] })),
+    skippedZeros: kept.length - nonZero.length,
+    skippedByTerms: all.length - kept.length,
+    selectedAmountId: null, // until a row is picked, the table's first row is shown
+    startedAt: performance.now(),
+    elapsedMs: 0,
+  };
+  set(s => ({
+    runs: isNew ? [run, ...s.runs] : s.runs.map(r => (r.id === run.id ? run : r)),
+    selectedRunId: run.id,
+    previewId: null,
+  }));
+
+  const budget = { maxResults: 3, timeLimitMs: base.settings.maxCount === null ? 3000 : 1500 };
+  for (const a of nonZero) {
+    const request = buildRequest(state, base.settings, a.value, a.id, base.terms, budget);
+    if (typeof request === 'string') { onCheckRow(run.id, a.id, []); continue; }
+    const key = `${run.id}:${a.id}`;
+    handles.set(key, getPool().run(request, ev => {
+      if (ev.type !== 'done' || ev.reason === 'stopped') return;
+      onCheckRow(run.id, a.id, ev.matches);
+    }));
+  }
+  return true;
+}
+
+function onCheckRow(runId: string, amountId: string, matches: Match[]) {
+  handles.delete(`${runId}:${amountId}`);
+  const best = matches[0];
+  const status: RowStatus = !best ? 'notfound' : best.items.length === 1 ? 'found' : 'combo';
+  set(s => ({
+    runs: s.runs.map(r => {
+      if (r.id !== runId || r.kind !== 'check' || r.status !== 'running') return r;
+      const rows = r.rows.map(x => (x.amountId === amountId ? { ...x, status, matches } : x));
+      const finished = rows.every(x => x.status !== 'pending');
+      return { ...r, rows, status: finished ? 'done' : r.status, elapsedMs: finished ? performance.now() - r.startedAt : r.elapsedMs };
+    }),
+  }));
+}
+
+export function selectCheckRow(runId: string, amountId: string) {
+  set(s => ({
+    runs: s.runs.map(r => (r.id === runId && r.kind === 'check' ? { ...r, selectedAmountId: amountId } : r)),
+    previewId: amountId,
+  }));
+}
+
+// ---------- the list of runs ----------
+
+export function stopRun(id: string) {
+  const r = state.runs.find(x => x.id === id);
+  if (!r) return;
+  if (r.kind === 'search') { handles.get(id)?.stop(); return; }
+  for (const [key, h] of handles) if (key.startsWith(`${id}:`)) { h.stop(); handles.delete(key); }
+  if (r.status === 'running') patchRun(id, () => ({ status: 'stopped', elapsedMs: performance.now() - r.startedAt }));
+}
+
+export function removeRun(id: string) {
+  stopRun(id);
   handles.delete(id);
   set(s => {
-    const searches = s.searches.filter(r => r.id !== id);
-    return { searches, selectedSearchId: s.selectedSearchId === id ? searches[0]?.id ?? null : s.selectedSearchId };
+    const runs = s.runs.filter(r => r.id !== id);
+    return { runs, selectedRunId: s.selectedRunId === id ? runs[0]?.id ?? null : s.selectedRunId };
   });
 }
 
 export function clearFinished() {
   set(s => {
-    const searches = s.searches.filter(r => r.status === 'running');
-    return { searches, selectedSearchId: searches.some(r => r.id === s.selectedSearchId) ? s.selectedSearchId : searches[0]?.id ?? null };
+    const runs = s.runs.filter(r => r.status === 'running');
+    return { runs, selectedRunId: runs.some(r => r.id === s.selectedRunId) ? s.selectedRunId : runs[0]?.id ?? null };
   });
 }
 
-/** Run a restored (idle) or finished search again with its saved settings. */
-export function rerunSearch(id: string) {
-  const r = state.searches.find(x => x.id === id);
+/** Run a restored (idle) or finished run again with its saved settings and filters. */
+export function rerunRun(id: string) {
+  const r = state.runs.find(x => x.id === id);
   if (!r) return;
-  const request = buildRequest(state, r.settings.groupId, r.settings, r.target, r.originId, { maxResults: 50, timeLimitMs: 10_000 });
+  stopRun(id);
+  if (r.kind === 'check') { launchCheck(r, false); return; }
+  const request = buildRequest(state, r.settings, r.target, r.originId, r.terms, SEARCH_BUDGET);
   if (typeof request === 'string') { notify('warn', request); return; }
-  patchSearch(id, () => ({ status: 'running', reason: null, matches: [], nearest: null, progress: 0, startedAt: performance.now() }));
-  set({ selectedSearchId: id });
-  start(id, request);
+  patchRun(id, () => ({ status: 'running', reason: null, matches: [], progress: 0, startedAt: performance.now() }));
+  set({ selectedRunId: id, previewId: null });
+  startSearch(id, request);
 }
 
-export function selectSearch(id: string) {
-  const r = state.searches.find(x => x.id === id);
-  set({ selectedSearchId: id, previewId: r?.matches[0]?.items[0].id ?? null });
+export function selectRun(id: string) {
+  const r = state.runs.find(x => x.id === id);
+  const previewId = !r ? null : r.kind === 'search' ? r.matches[0]?.items[0].id ?? null : r.selectedAmountId ?? r.rows[0]?.amountId ?? null;
+  set({ selectedRunId: id, previewId });
 }
 
 export function showPreview(amountId: string | null) { set({ previewId: amountId }); }
-
-/** Clicking a number in a preview: search for it with the current settings. */
-export function searchForAmount(amountId: string) {
-  const hit = amountIndex().get(amountId);
-  if (!hit) return;
-  runSearch(formatMoney(hit.amount.value, hit.amount.decimals).replace('−', '-'), amountId);
-}
-
-// ---------- check a group ----------
-
-export function openCheckSetup(open: boolean) { set({ checkSetupOpen: open }); }
-
-export function startCheck(checkGroupId: string, againstGroupId: string, settings: Omit<FindSettings, 'groupId'>) {
-  stopCheck();
-  const checked = groupFiles(state, checkGroupId);
-  if (!checked.length) { notify('warn', `${groupName(state, checkGroupId)} has no files yet.`); return; }
-  const amounts = checked.flatMap(m => m.file.parsed?.amounts ?? []);
-  const nonZero = amounts.filter(a => Math.abs(a.value) >= 0.005);
-  const run: CheckRun = {
-    id: uid('c'), checkGroupId, againstGroupId, settings,
-    rows: nonZero.map(a => ({ amountId: a.id, status: 'pending', matches: [], nearest: null })),
-    status: 'running', skippedZeros: amounts.length - nonZero.length,
-  };
-  set({ check: run, view: 'check', checkSetupOpen: false, previewId: nonZero[0]?.id ?? null });
-
-  const budget = { maxResults: 3, timeLimitMs: settings.maxCount === null ? 3000 : 1500 };
-  for (const a of nonZero) {
-    const request = buildRequest(state, againstGroupId, settings, a.value, a.id, budget);
-    if (typeof request === 'string') { notify('warn', request); stopCheck(); return; }
-    const key = `${run.id}:${a.id}`;
-    handles.set(key, getPool().run(request, ev => {
-      if (ev.type !== 'done') return;
-      handles.delete(key);
-      const best = ev.matches[0];
-      const status: RowStatus = !best ? 'notfound' : best.items.length === 1 ? 'found' : 'combo';
-      set(s => {
-        if (!s.check || s.check.id !== run.id) return {};
-        const rows = s.check.rows.map(r => (r.amountId === a.id ? { ...r, status, matches: ev.matches, nearest: ev.nearest } : r));
-        const done = rows.every(r => r.status !== 'pending');
-        return { check: { ...s.check, rows, status: done && s.check.status === 'running' ? 'done' : s.check.status } };
-      });
-    }));
-  }
-}
-
-export function stopCheck() {
-  const run = state.check;
-  if (!run) return;
-  for (const [key, h] of handles) if (key.startsWith(`${run.id}:`)) { h.stop(); handles.delete(key); }
-  if (run.status === 'running') set(s => ({ check: s.check && { ...s.check, status: 'stopped' } }));
-}
-
-export function closeCheck() { set({ view: 'workspace' }); }
-export function openCheck() { if (state.check) set({ view: 'check' }); }
