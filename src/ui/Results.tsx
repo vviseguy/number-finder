@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { IconArrowsExchange, IconChevronDown, IconHistory, IconSearch, IconUpload } from '@tabler/icons-react';
 import { chooseFiles } from './FindBar';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, showPreview, shownRun, targetText, useAppState, viewVersion,
-  type Run, type SearchRun,
+  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, setResultSort, showPreview, shownRun, sortedMatches, targetText,
+  useAppState, viewVersion, type Run, type SearchRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
-import { formatMoney, locationShort, madeOfPhrase, roundingPhrase } from '../lib/format';
+import { formatMoney, locationShort, madeOfPhrase, plural, roundingPhrase } from '../lib/format';
 import { findNearMiss } from '../lib/nearmiss';
 import { passesTerms, termsPhrase } from '../lib/query';
+import { SORT_LABEL, SORTS, type ResultSort } from '../lib/rank';
 import type { Match, MatchItem } from '../types';
 import { arrowNav } from './common';
 import { CheckResults } from './CheckResults';
@@ -16,6 +17,7 @@ import { Equation, sumTitle } from './Equation';
 import { formatTime } from './checkParts';
 import { Money } from './Money';
 import { NearButton } from './NearButton';
+import { Pick } from './Pick';
 import { VersionPicker } from './RunList';
 
 export function Results() {
@@ -75,21 +77,27 @@ function VersionBar({ live, past }: { live: Run; past: boolean }) {
 
 function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   const s = useAppState();
-  const items = r.matches.flatMap(m => m.items.map(i => i.id));
-  const previewId = s.previewId ?? items[0] ?? null;
+  const matches = sortedMatches(s, r);
+  const previewId = s.previewId ?? matches[0]?.items[0].id ?? null;
 
   return (
     <section className="results" aria-labelledby="h-results">
       <h3 id="h-results" className="sub-h">
         <span className="nowrap">Results for <span className="num">{targetText(r)}</span></span>
-        {r.matches.length > 0 && <span className="count push">↑ ↓ to move · hover a number to see it elsewhere</span>}
+        {matches.length > 0 && <span className="count">{plural(matches.length, 'match', 'matches')} · ↑ ↓ to move · hover a number to see it elsewhere</span>}
+        {matches.length > 1 && (
+          <span className="push line sort-pick">
+            <span className="label">Order</span>
+            <Pick value={s.resultSort} label="Order of results" options={SORTS.map(k => ({ value: k, label: SORT_LABEL[k] }))} onChange={v => setResultSort(v as ResultSort)} />
+          </span>
+        )}
       </h3>
-      {r.status === 'running' && !r.matches.length && <p className="muted pad">Searching…</p>}
+      {r.status === 'running' && !matches.length && <p className="muted pad">Searching…</p>}
       {r.status === 'idle' && <p className="muted pad">This search is from an earlier session. Add its files and press Run.</p>}
-      {r.status === 'done' && !r.matches.length && <NotFound run={r} readOnly={readOnly} />}
-      {r.matches.length > 0 && (
+      {r.status === 'done' && !matches.length && <NotFound run={r} readOnly={readOnly} />}
+      {matches.length > 0 && (
         <div className="result-list" onKeyDown={arrowNav}>
-          {r.matches.map((m, i) => <MatchRows key={i} match={m} run={r} previewId={previewId} />)}
+          {matches.map(m => <MatchRows key={m.items.map(i => `${i.sign < 0 ? '-' : ''}${i.id}`).join('+')} match={m} run={r} previewId={previewId} />)}
         </div>
       )}
     </section>

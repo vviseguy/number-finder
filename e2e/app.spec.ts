@@ -128,6 +128,44 @@ test('the bar grammar: a range, sums:, ±, neg, and in:', async ({ page }) => {
   await expect(page.locator('.notice')).toContainText('No group is called "Nowhere"');
 });
 
+test('the bar grammar: "quotes", ~close, \'text, and +- becomes ±', async ({ page }) => {
+  await open(page, SOURCES);
+  await page.getByLabel('Rounding').selectOption('exact');
+
+  // Typing +- (or -+) folds into ± as you type, with the caret staying put.
+  const input = page.locator('#find-input');
+  await input.click();
+  await input.pressSequentially('3,234.56 +-0.01');
+  await expect(input).toHaveValue('3,234.56 ±0.01');
+  await input.press('Enter');
+  await expect(page.locator('.search-row').first()).toContainText('±0.01');
+
+  // Quotes: exactly this phrase, in the label, sheet, or file name.
+  await find(page, '3,234.56 "interest income"');
+  await expect(page.locator('.query-echo')).toContainText('Only numbers that mention “interest income”');
+  await expect(page.locator('.result-row')).toHaveCount(1);
+  await expect(page.locator('.result-row').first()).toContainText('1099-INT.pdf');
+
+  // ~word: a small typo is fine. The workpapers' "Interest" sheet counts too, so all three show again.
+  await find(page, '3,234.56 ~intrest');
+  await expect(page.locator('.result-row')).toHaveCount(3);
+  await expect(page.locator('.result-row').first()).toContainText('1099-INT.pdf');
+  await expect(page.locator('.search-row').first()).toContainText('close to “intrest”');
+  await find(page, '3,234.56 ~intrst'); // two edits in a 6-letter word is too far: nothing is left to search
+  await expect(page.locator('.notice')).toContainText('after the filters (close to “intrst”)');
+
+  // 'text: not a filter, but those numbers come first; the results can be re-ordered.
+  await find(page, "3,234.56 'workpapers");
+  await expect(page.locator('.result-row')).toHaveCount(3);
+  await expect(page.locator('.result-row').first()).toContainText('workpapers.xlsx');
+  await expect(page.locator('.search-row').first()).toContainText('“workpapers” first');
+  await page.getByLabel('Order of results').selectOption('position');
+  await expect(page.locator('.result-row').first()).toContainText('1099-INT.pdf');
+  await page.getByLabel('Order of results').selectOption('best');
+  await expect(page.locator('.result-row').first()).toContainText('workpapers.xlsx');
+  await page.screenshot({ path: path.join(SHOTS, '09-grammar.png') });
+});
+
 test('sums show as an equation that opens into the full breakdown, with −( ) for negatives', async ({ page }) => {
   await open(page, ['workpapers.xlsx']);
   await page.getByLabel('Match').selectOption('sums');
@@ -284,21 +322,25 @@ test('hovering a result marks the same number everywhere', async ({ page }) => {
   await expect(page.locator('.result-row.linked')).toHaveCount(0);
 });
 
-test('whole-group mode checks every number in a group against another', async ({ page }) => {
+test('check: looks up every number in a group against another', async ({ page }) => {
   await open(page, [...SOURCES, ...RETURN]);
   await makeGroup(page, 'Source docs', SOURCES);
   await makeGroup(page, '2025 return', RETURN);
-  await page.getByRole('radio', { name: 'Whole group' }).click();
-  await page.getByLabel('Group to check').selectOption({ label: '2025 return' });
+  // The card's button puts check:"2025 return" in the bar and picks the other group to look in.
+  await page.locator('.group-card', { hasText: '2025 return' }).getByRole('button', { name: 'Check every number…' }).click();
+  await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#find-input')).toHaveValue('check:"2025 return"');
+  await expect(page.locator('#find-input')).toBeFocused();
   await expect(page.locator('.searchbar .where .sentence')).toHaveText('against');
-  await page.getByLabel('Group to search').selectOption({ label: 'Source docs' });
+  await expect(page.locator('.searchbar .where .pick-text')).toContainText('Source docs');
+  await expect(page.locator('.query-echo')).toContainText('Every number in 2025 return will be looked up against Source docs');
   await page.getByLabel('Match').selectOption('sums');
   await page.getByLabel('Most numbers in a sum').fill('3');
   await page.getByRole('button', { name: 'Search' }).click();
 
-  await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('.progress-card')).toContainText('Checked', { timeout: 60_000 });
   await expect(page.locator('.search-row').first()).toContainText('Every number in');
+  await expect(page.locator('#find-input')).toHaveValue('check:"2025 return"'); // the query stays
   const rows = page.locator('.tieout tbody tr');
   await expect(rows.first()).toContainText('Not found');
   const text = (await rows.allInnerTexts()).join('\n');

@@ -70,7 +70,7 @@ export function App() {
           <span>
             <h1>Number finder</h1>
             <span className="brand-sub" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
-              <IconLock size={11} stroke={2} aria-hidden /> Files stay on this computer
+              <IconLock size={12} stroke={2} aria-hidden /> All data stays local
             </span>
           </span>
         </button>

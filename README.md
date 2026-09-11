@@ -14,7 +14,7 @@ Double-click **`numberfinder.html`**. It opens in your browser and works offline
 
 Everything happens inside that browser tab. The page includes a security rule (a Content-Security-Policy) that stops it from making any network connection at all, so documents can't be sent anywhere — you can check the rule at the top of the HTML file.
 
-Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, your searches, the pane width, and the theme — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
+Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, your searches, the order of results, the pane width, and the theme — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
 
 ## Using it
 
@@ -27,21 +27,27 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
    - **Negatives:** *also try negatives* lets any number count as negative.
 
-   **The bar's grammar** (the empty bar shows these in turn):
+   **The bar's grammar** (the empty bar shows these in turn). Words are matched against a number's label, its column and sheet, and its file name, never minding case:
    | Type | Means |
    | --- | --- |
    | `3,235 85,000` | two numbers, two searches |
    | `3,200..3,300` | every number in a range |
-   | `3,235 -hours` | skip numbers whose label, column, sheet, or file name mentions "hours" |
-   | `3,235 interest` | only numbers that mention "interest"; `-"hourly rate"` keeps a phrase together |
+   | `3,235 interest` | only numbers that mention "interest" |
+   | `3,235 "box 1"` | quotes: only numbers that mention exactly this phrase; `"1099"` is text, not an amount |
+   | `3,235 -hours` | skip numbers that mention "hours"; `-"hourly rate"` skips a phrase |
+   | `3,235 ~intrest` | `~` allows a small typo: one wrong, missing, or extra letter from 4 letters, two from 8; `~1099int` finds "1099-INT" |
+   | `3,235 '2025` | `'` reads 2025 as text instead of an amount, and lists the numbers that mention it first (it doesn't filter); `-'2025` skips them |
    | `3,235 in:Source` | look in the group whose name starts with "Source" (quotes for spaces) |
+   | `check:"2025 return"` | look up every number in that group (see below) |
    | `3,235 sums:3` | sums of up to 3 numbers; `sums:any`, `sums:1` |
-   | `3,235 ±0.50` or `~0.50` | within 50 cents |
+   | `3,235 ±0.50` or `~0.50` | within 50 cents; typing `+-` or `-+` in the bar turns into `±` |
    | `3,235 neg` | let numbers count as negative |
 
    Words like `in:`, `sums:`, `±`, and `neg` override the pills for that one search. Filters apply before the search, so a skipped number can never be part of a sum.
 
-   **Whole group.** Switch the bar from *One number* to *Whole group*, pick *Every number in* `2025 return`, and the right side reads *against* `Source docs`. Every number in the first group is looked up in the second, with the same Match, Rounding, and filter settings. The result is a table of what was found, what's made of several numbers, and what's missing.
+   **Order.** With several matches, the *Order* picker above the results offers *Best match* (fewest numbers, then the ones mentioning a `'word`, then fewest negatives, then closest), *Closest first*, *By file*, and *Document order*. It's remembered.
+
+   **Whole group.** Type `check:"2025 return"` in the bar, or press *Check every number…* on the group's card in step 2, which types it for you. The right side then reads *against* `Source docs`: every number in the first group is looked up in the second, with the same Match, Rounding, and filter words. The result is a table of what was found, what's made of several numbers, and what's missing.
 
    **History and versions.** Searches and checks run side by side in the history; each shows its progress and can be stopped. Versions are automatic: searching the *same number* again with different settings or filters makes a new version of that search (so does a "try…" button under a miss); a *different* number is a new search; the identical search just shows the existing one. The bar above the results says which version you're on and when it ran; its picker shows every past version read-only, with *Back to current* and *Restore*.
 
@@ -82,6 +88,7 @@ npm run build
 | `src/types.ts` | Contracts shared by extraction, the engine, and the UI |
 | `src/extract/` | Reads PDFs (pdf.js), Excel and CSV (SheetJS): amounts, labels, locations |
 | `src/engine/` | The search: exact lookups, combinations, negatives, per-file limits, nearest number; runs in background workers |
+| `src/lib/query.ts`, `fuzzy.ts`, `rank.ts` | The bar's grammar, the `~word` matcher, and the orders results can be shown in |
 | `src/state/store.ts` | App state, actions, and what's remembered between sessions |
 | `src/ui/` | The interface |
 | `e2e/` | Browser tests of the built file |

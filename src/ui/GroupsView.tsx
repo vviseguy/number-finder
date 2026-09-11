@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconPencil, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
-import { addMember, createGroup, deleteGroup, fileLabel, removeMember, renameGroup, setLimit, useAppState, type Group } from '../state/store';
+import { IconListCheck, IconPencil, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
+import { addMember, checkGroup, createGroup, deleteGroup, fileLabel, removeMember, renameGroup, setLimit, useAppState, type Group } from '../state/store';
 import { describeLimit, parseLimit, plural } from '../lib/format';
 
 /** Step 2: groups are sets of files to search in. A file can be in several. */
@@ -18,7 +18,7 @@ export function GroupsView() {
       </div>
       <p className="muted">
         A group is a set of files to search in, like <b>Source docs</b> or <b>2025 return</b>. A file can be in several groups. Until you make one, searches look through all files.
-        To check a whole return, put it in one group and your source documents in another.
+        To check a whole return, put it in one group and your source documents in another, then press <b>Check every number</b> on the return's card.
       </p>
       <div className="groups-grid">
         {s.groups.map(g => <GroupCard key={g.id} group={g} editing={editing === g.id} onEdit={v => setEditing(v ? g.id : null)} />)}
@@ -99,6 +99,16 @@ function GroupCard({ group, editing, onEdit }: { group: Group; editing: boolean;
           {addable.map(f => <option key={f.key} value={f.key}>{f.name}</option>)}
           {addable.length > 1 && <option value="__all__">All {addable.length} files not in this group</option>}
         </select>
+      )}
+      {group.members.length > 0 && (
+        <button
+          type="button"
+          className="btn sm check-btn"
+          title={`Look up every number in ${group.name} in another group: puts check:"${group.name}" in the search bar`}
+          onClick={() => checkGroup(group.id)}
+        >
+          <IconListCheck size={13} aria-hidden /> Check every number…
+        </button>
       )}
     </div>
   );
