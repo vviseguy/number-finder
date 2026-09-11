@@ -10,9 +10,9 @@
 //                            are listed first (a preference, not a filter); -'2025 skips it
 //   3,235 in:Source          look in the group whose name starts with "Source" (quotes for spaces)
 //   check:"2025 return"      look up every number in that group (against the "in" group)
-//   3,235 sums:3             sums of up to 3 numbers (sums:any, sums:1)
+//   3,235 sums:3             sums of up to 3 numbers; sums:=3 exactly 3; sums:2..4 between; sums:2+ at least 2; sums:any
 //   3,235 ±0.50  or  ~0.50   within 50 cents (~ before a number is a tolerance, before a word a fuzzy match)
-//   3,235 neg                let numbers count as negative
+//   3,235 neg                let numbers count as negative; neg:1 at most one of them; neg:0 none
 // A minus directly before a digit is a negative number ("-265.44"), not a filter. Filters apply before
 // the search, so a skipped number can never be part of a sum.
 
@@ -49,21 +49,28 @@ export interface Query {
   checkGroup: string | null;
   /** undefined = not given; null = any sum. */
   maxCount: number | null | undefined;
+  /** Fewest numbers in a sum (sums:=3, sums:2..4, sums:2+); undefined when not given or 1. */
+  minCount: number | undefined;
   tolerance: number | undefined;
   negatives: boolean | undefined;
+  /** With negatives: at most this many numbers counted as negative (neg:1); undefined = no limit. */
+  maxFlips: number | undefined;
   errors: string[];
 }
 
 const TOKEN = /[^\s"]*"[^"]*"?|\S+/g;
 
 export function parseQuery(text: string): Query {
-  const q: Query = { numbers: [], range: null, terms: emptyTerms(), inGroup: null, checkGroup: null, maxCount: undefined, tolerance: undefined, negatives: undefined, errors: [] };
+  const q: Query = {
+    numbers: [], range: null, terms: emptyTerms(), inGroup: null, checkGroup: null,
+    maxCount: undefined, minCount: undefined, tolerance: undefined, negatives: undefined, maxFlips: undefined, errors: [],
+  };
   const unquote = (s: string) => s.replace(/^"|"$/g, '').trim();
   const add = (list: string[], word: string) => { if (word && !list.includes(word)) list.push(word); };
   for (const raw of String(text ?? '').match(TOKEN) ?? []) {
     const lower = raw.toLowerCase();
 
-    let m = /^([^.\s]+)\.\.([^.\s]+)$/.exec(raw);
+    let m = /^([^.\s:]+)\.\.([^.\s:]+)$/.exec(raw); // a range of amounts (sums:2..4 is a range of counts, below)
     if (m) {
       const lo = parseAmountInput(m[1]);
       const hi = parseAmountInput(m[2]);
@@ -81,9 +88,23 @@ export function parseQuery(text: string): Query {
     m = /^sums?:(.+)$/i.exec(raw);
     if (m) {
       const v = m[1].toLowerCase();
-      if (v === 'any') q.maxCount = null;
-      else if (/^\d+$/.test(v) && +v >= 1) q.maxCount = +v;
-      else q.errors.push(`"${raw}" should be sums:3 or sums:any.`);
+      let r: RegExpExecArray | null;
+      if (v === 'any') { q.maxCount = null; q.minCount = undefined; }
+      else if (/^\d+$/.test(v) && +v >= 1) { q.maxCount = +v; q.minCount = undefined; }
+      else if ((r = /^=(\d+)$/.exec(v)) && +r[1] >= 1) { q.maxCount = +r[1]; q.minCount = +r[1] > 1 ? +r[1] : undefined; }
+      else if ((r = /^(\d+)\.\.(\d+)$/.exec(v)) && +r[1] >= 1 && +r[2] >= +r[1]) { q.minCount = +r[1] > 1 ? +r[1] : undefined; q.maxCount = +r[2]; }
+      else if ((r = /^(\d+)\+$/.exec(v)) && +r[1] >= 1) { q.minCount = +r[1] > 1 ? +r[1] : undefined; q.maxCount = null; }
+      else q.errors.push(`"${raw}" should be sums:3, sums:=3 (exactly), sums:2..4, sums:2+, or sums:any.`);
+      continue;
+    }
+
+    m = /^neg(?:atives?)?:(.+)$/i.exec(raw);
+    if (m) {
+      const v = m[1].toLowerCase();
+      if (v === 'off' || v === '0') { q.negatives = false; q.maxFlips = undefined; }
+      else if (v === 'on' || v === 'any') { q.negatives = true; q.maxFlips = undefined; }
+      else if (/^\d+$/.test(v)) { q.negatives = true; q.maxFlips = +v; }
+      else q.errors.push(`"${raw}" should be neg, neg:1 (at most one), or neg:off.`);
       continue;
     }
 
@@ -104,8 +125,7 @@ export function parseQuery(text: string): Query {
       }
     }
 
-    if (lower === 'neg' || lower === 'negatives' || lower === 'negatives:on') { q.negatives = true; continue; }
-    if (lower === 'negatives:off') { q.negatives = false; continue; }
+    if (lower === 'neg' || lower === 'negative' || lower === 'negatives') { q.negatives = true; q.maxFlips = undefined; continue; }
 
     // Prefixes: - (skip), + (keep), ~ (close to), ' (text, preferred). -' skips the text; -~ skips anything close.
     const minusFilter = /^-(?![\d.(])/.test(raw);

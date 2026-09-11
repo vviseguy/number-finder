@@ -7,7 +7,7 @@ import type { Terms } from './query';
 import type { ResultSort } from './rank';
 
 export interface SavedGroup { id: string; name: string; color: number; members: { key: string; name: string; limit: string }[] }
-export interface SavedFind { groupId: string; maxCount: number | null; rounding: Rounding; allowFlips: boolean; tolerance?: number }
+export interface SavedFind { groupId: string; maxCount: number | null; minCount?: number; rounding: Rounding; allowFlips: boolean; maxFlips?: number; tolerance?: number }
 export type SavedRun =
   | { kind: 'search'; target: number; targetDecimals: number; range: { lo: number; hi: number } | null; settings: SavedFind; terms: Terms }
   | { kind: 'check'; checkGroupId: string; settings: SavedFind; terms: Terms };
@@ -20,6 +20,14 @@ export interface SavedSetup {
   runs: SavedRun[];
   /** Name of the folder the files came from, when one was opened (the folder itself can't be saved in a file). */
   folder?: string;
+  /** When the setup last changed (ms since 1970). A setup file in a folder is loaded only when it's newer than this. */
+  changedAt?: number;
+}
+
+/** The same setup, whatever its timestamps: true when nothing that matters differs. */
+export function sameSetup(a: SavedSetup, b: SavedSetup): boolean {
+  const strip = ({ changedAt: _c, folder: _f, ...rest }: SavedSetup) => JSON.stringify(rest);
+  return strip(a) === strip(b);
 }
 
 export const SETUP_FILE_NAME = 'Number finder setup.json';
@@ -54,5 +62,8 @@ export function parseSetup(text: string): { setup: SavedSetup; savedAt: string }
     runs: Array.isArray(s.runs) ? s.runs.filter(r => r && (r.kind === 'search' || r.kind === 'check')) : [],
     folder: typeof s.folder === 'string' ? s.folder : undefined,
   };
-  return { setup, savedAt: typeof f.savedAt === 'string' ? f.savedAt : '' };
+  const savedAt = typeof f.savedAt === 'string' ? f.savedAt : '';
+  const changedAt = typeof s.changedAt === 'number' ? s.changedAt : Date.parse(savedAt) || 0;
+  if (changedAt) setup.changedAt = changedAt;
+  return { setup, savedAt };
 }

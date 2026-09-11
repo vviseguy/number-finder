@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
 import { IconArrowsExchange, IconEye, IconSearch } from '@tabler/icons-react';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, runSearch, showPreview, shownRun, useAppState,
+  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, runSearch, showPreview, shownRun, sortedMatches, useAppState,
   type CheckRow, type CheckRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
@@ -24,7 +24,7 @@ export function SidePane() {
   let content: ReactNode = null;
 
   if (run?.kind === 'search') {
-    const items = run.matches.flatMap(m => m.items.map(i => i.id));
+    const items = sortedMatches(s, run).flatMap(m => m.items.map(i => i.id));
     const id = s.previewId ?? items[0] ?? null;
     if (id) content = <Preview amountId={id} navIds={items} onNavigate={showPreview} />;
   } else if (run?.kind === 'check' && run.rows.length) {
@@ -56,11 +56,12 @@ function CheckDetail({ run, row, readOnly }: { run: CheckRun; row: CheckRow; rea
   const s = useAppState();
   const idx = amountIndex(s);
   const hit = idx.get(row.amountId);
+  // Only the row, the files, and the settings matter here — not every progress update of the check.
   const near = useMemo(() => {
     if (!hit || (row.status !== 'notfound' && row.status !== 'combo')) return null;
     const pool = groupAmounts(s, run.settings.groupId).filter(a => { const h = idx.get(a.id); return a.id !== row.amountId && !!h && passesTerms(a, fileTermText(h.file), run.terms); });
     return findNearMiss(hit.amount.value, hit.amount.decimals, pool, a => a.value, run.settings.allowFlips);
-  }, [hit, row, run.settings, run.terms, s, idx]);
+  }, [hit, row.amountId, row.status, run.settings, run.terms, s.files, s.groups, idx]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!hit) return null;
   const { amount } = hit;
   const st = run.settings;
@@ -95,7 +96,7 @@ function CheckDetail({ run, row, readOnly }: { run: CheckRun; row: CheckRow; rea
 
       {row.status === 'notfound' && (
         <>
-          <p>Nothing in {groupName(s, st.groupId)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount)}, {roundingPhrase(st.rounding, st.tolerance)}.</p>
+          <p>Nothing in {groupName(s, st.groupId)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount, st.minCount)}, {roundingPhrase(st.rounding, st.tolerance)}.</p>
           {near
             ? <NearButton near={near} target={amount.value} decimals={amount.decimals} onShow={showPreview} />
             : <p className="muted">Nothing in {groupName(s, st.groupId)} is close to it either.</p>}

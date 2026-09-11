@@ -164,12 +164,14 @@ function NotFound({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   const candidates = groupAmounts(s, r.settings.groupId)
     .filter(a => a.id !== r.originId && passesTerms(a, idx.get(a.id) ? fileTermText(idx.get(a.id)!.file) : '', r.terms));
   const near = r.range ? null : findNearMiss(r.target, r.targetDecimals, candidates, a => a.value, r.settings.allowFlips);
-  const how = r.range ? '' : ` ${madeOfPhrase(r.settings.maxCount)}, ${roundingPhrase(r.settings.rounding, r.settings.tolerance)}`;
+  const how = r.range ? '' : ` ${madeOfPhrase(r.settings.maxCount, r.settings.minCount)}, ${roundingPhrase(r.settings.rounding, r.settings.tolerance)}`;
   const filters = termsPhrase(r.terms);
   const tries: { label: string; patch: Parameters<typeof retryWith>[1] }[] = [];
   if (!r.range) {
-    if (r.settings.maxCount !== null && r.settings.maxCount < 3) tries.push({ label: 'Try sums of up to 3', patch: { maxCount: 3 } });
-    if (!r.settings.allowFlips) tries.push({ label: 'Also try negatives', patch: { allowFlips: true } });
+    if ((r.settings.minCount ?? 1) > 1) tries.push({ label: `Try sums of up to ${r.settings.maxCount ?? 'any size'}`, patch: { minCount: undefined } });
+    else if (r.settings.maxCount !== null && r.settings.maxCount < 3) tries.push({ label: 'Try sums of up to 3', patch: { maxCount: 3, minCount: undefined } });
+    if (!r.settings.allowFlips) tries.push({ label: 'Also try negatives', patch: { allowFlips: true, maxFlips: undefined } });
+    else if (r.settings.maxFlips !== undefined) tries.push({ label: 'Allow any number of negatives', patch: { maxFlips: undefined } });
     if (r.settings.rounding === 'exact' || r.settings.tolerance === 0) tries.push({ label: 'Round to whole dollars', patch: { rounding: 'dollar' } });
   }
 

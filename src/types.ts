@@ -72,10 +72,14 @@ export interface Candidate {
 
 export interface SearchRequest {
   target: number;
+  /** Fewest numbers that may combine (default 1). minCount = maxCount = 3 means "sums of exactly 3". */
+  minCount?: number;
   /** Most numbers that may combine: 1 = exact lookup; null = any count. */
   maxCount: number | null;
   /** Any number may count as negative. With maxCount 1 this means matching ±target. */
   allowFlips: boolean;
+  /** With allowFlips: at most this many numbers in a match may count as negative (null/undefined = no limit). */
+  maxFlips?: number | null;
   /** |sum − target| ≤ tolerance counts as a match. */
   tolerance: number;
   candidates: Candidate[];

@@ -3,14 +3,15 @@
 /* Light and dark values side by side. The theme follows the system unless html[data-theme] pins it. */
 :root {
   color-scheme: light dark;
-  --bg: light-dark(#f6f5f1, #161615);
-  --panel: light-dark(#ffffff, #1f1f1e);
-  --sunken: light-dark(#f1f0eb, #262625);
+  /* Light mode is a warm, slightly dimmed paper rather than pure white, so it's easy on the eyes for long sessions. */
+  --bg: light-dark(#ebe9e3, #161615);
+  --panel: light-dark(#f6f5f1, #1f1f1e);
+  --sunken: light-dark(#e8e6df, #262625);
   --text: light-dark(#1d1d1b, #f1efe8);
   --text-2: light-dark(#55544f, #c9c7bf);
   --text-3: light-dark(#6f6e69, #a3a19a);
-  --line: light-dark(rgba(20, 20, 15, 0.1), rgba(255, 255, 255, 0.1));
-  --line-2: light-dark(rgba(20, 20, 15, 0.2), rgba(255, 255, 255, 0.22));
+  --line: light-dark(rgba(20, 20, 15, 0.12), rgba(255, 255, 255, 0.1));
+  --line-2: light-dark(rgba(20, 20, 15, 0.22), rgba(255, 255, 255, 0.22));
   --accent: light-dark(#1f5fa8, #2f6fbf);
   --accent-hover: light-dark(#174c88, #3b82d6);
   --accent-text: light-dark(#1f5fa8, #8ab8ee);
@@ -159,7 +160,7 @@ select, option, optgroup { background-color: var(--panel); color: var(--text); }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe, body.resizing canvas { pointer-events: none; }
 .col-wrap { position: relative; min-width: 0; min-height: 0; display: flex; }
-.main { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 18px 24px 48px; display: flex; flex-direction: column; gap: 18px; }
+.main { flex: 1; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 18px 24px 48px; display: flex; flex-direction: column; gap: 18px; }
 /* The Find column: everything sits centred at a comfortable width; a prompt (no search picked) is centred vertically too. */
 .find-main > * { width: min(100%, 1000px); margin-left: auto; margin-right: auto; flex: none; }
 .find-main > .prompt { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; min-height: 160px; }
@@ -168,7 +169,7 @@ body.resizing iframe, body.resizing canvas { pointer-events: none; }
   min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px;
   padding: 14px; background: var(--panel);
 }
-.view { flex: 1; min-height: 0; overflow: auto; padding: 18px 24px 48px; display: flex; flex-direction: column; gap: 12px; }
+.view { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 18px 24px 48px; display: flex; flex-direction: column; gap: 12px; }
 .view-title { font-size: 16px; font-weight: 600; margin: 0; display: flex; align-items: baseline; gap: 8px; }
 @media (max-width: 1000px) {
   .shell { height: auto; min-height: 100vh; }
@@ -424,15 +425,19 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 
 /* ---------- side pane and preview ---------- */
 .pane-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; color: var(--text-3); padding: 24px; }
-.side-pane .detail { flex: none; max-height: 45%; overflow: auto; }
+.side-pane .detail { flex: none; max-height: 45%; overflow: auto; scrollbar-gutter: stable; }
 .preview { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
 .preview-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text-2); }
 .preview-head .nav { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .preview-body-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
-.preview-body { flex: 1; min-height: 0; overflow: auto; background: var(--sunken); }
+/* scrollbar-gutter keeps the width steady whether or not a scrollbar is showing, so a page that barely fits can't flip between the two. */
+.preview-body { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; background: var(--sunken); }
 .preview-foot { flex: none; padding: 6px 12px; border-top: 1px solid var(--line); }
-.pdf-page { position: relative; margin: 12px; background: #fff; box-shadow: var(--shadow); }
-.pdf-page canvas { display: block; }
+.pdf-page { position: relative; margin: 12px; background: #fff; box-shadow: var(--shadow); overflow: hidden; }
+.pdf-stage { position: relative; transform-origin: top left; }
+.pdf-page canvas { display: block; filter: brightness(0.965); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .pdf-page canvas { filter: none; } }
+:root[data-theme='dark'] .pdf-page canvas { filter: none; }
 .hotspot { position: absolute; border: none; background: transparent; border-radius: 3px; cursor: pointer; padding: 0; }
 .hotspot:hover { background: rgba(31, 95, 168, 0.16); outline: 1.5px solid rgba(31, 95, 168, 0.5); }
 .hotspot.hit { background: var(--hit-soft); outline: 2.5px solid var(--hit); }

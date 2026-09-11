@@ -17,8 +17,9 @@
  *            lowered only if the scaled magnitudes could pass 2^52). Everything is scaled by
  *            10^d and rounded half away from zero; all sums and comparisons use those integers.
  *            Floats appear only in the output (sum, diff), rounded to d decimals.
- * Match      1..maxCount DISTINCT candidates (maxCount null = any count), each with sign +1
- *            (or +1/-1 when allowFlips) and |Σ sign·value − target| ≤ tolerance.
+ * Match      minCount..maxCount DISTINCT candidates (minCount default 1; maxCount null = any
+ *            count), each with sign +1 (or +1/-1 when allowFlips, at most maxFlips of them −1
+ *            when that is set) and |Σ sign·value − target| ≤ tolerance.
  *            A single candidate is reported once: with + if +value matches, else with −.
  * File caps  For each fileId in req.limits the match holds between min and max items from that
  *            file (max null = no cap). max 0 removes the file's numbers entirely; min > 0 means
@@ -102,6 +103,15 @@ export function validateRequest(req: SearchRequest): string | null {
   if (req.maxCount !== null && (!Number.isInteger(req.maxCount) || req.maxCount < 1)) {
     return 'The most numbers to combine must be a whole number of at least 1 (or "any").';
   }
+  if (req.minCount !== undefined && (!Number.isInteger(req.minCount) || req.minCount < 1)) {
+    return 'The fewest numbers to combine must be a whole number of at least 1.';
+  }
+  if (req.minCount !== undefined && req.maxCount !== null && req.minCount > req.maxCount) {
+    return `The fewest numbers to combine (${req.minCount}) is more than the most (${req.maxCount}).`;
+  }
+  if (req.maxFlips !== undefined && req.maxFlips !== null && (!Number.isInteger(req.maxFlips) || req.maxFlips < 0)) {
+    return 'The most numbers counted as negative must be a whole number of 0 or more (or no limit).';
+  }
   if (!isNum(req.tolerance) || req.tolerance < 0) return 'The rounding tolerance must be zero or more.';
   if (!Array.isArray(req.candidates)) return 'There is no list of numbers to search.';
   for (let i = 0; i < req.candidates.length; i++) {
@@ -174,6 +184,8 @@ class Engine {
   private lo = 0;
   private hi = 0;
   private flips = false;
+  private maxFlips = Infinity; // most −1 signs in a match (0 when flips are off)
+  private kmin = 1; // effective min item count (minCount, or the file minimums if larger)
   private kmax = 0; // effective max item count (≤ n)
   private knownSize = false; // maxCount ≤ 3: progress fraction is knowable
   private minF = new Float64Array(0);
@@ -263,7 +275,8 @@ class Engine {
     const cands = req.candidates;
     const n = cands.length;
     this.n = n;
-    this.flips = !!req.allowFlips;
+    this.flips = !!req.allowFlips && req.maxFlips !== 0;
+    this.maxFlips = this.flips ? (req.maxFlips ?? Infinity) : 0;
 
     let d = Math.max(decimalsOf(req.target), decimalsOf(req.tolerance));
     let absSum = 0;
@@ -332,6 +345,8 @@ class Engine {
     }
     if (this.minFiles.length > 0) this.checkLimits = true;
     if (sumMin > this.kmax) this.impossible = true;
+    this.kmin = Math.max(req.minCount ?? 1, sumMin);
+    if (this.kmin > this.kmax) this.impossible = true;
 
     this.sumMin = sumMin;
     this.minF = minF;
@@ -493,11 +508,13 @@ class Engine {
 
   private *run(): Generator<void, DoneReason, unknown> {
     if (this.impossible || this.n === 0) return 'exhausted';
-    const { lo, hi, tol, kmax, sumMin, checkLimits } = this;
+    const { lo, hi, tol, kmin, kmax, sumMin, checkLimits } = this;
+    const mf = this.maxFlips;
+    const limitFlips = mf !== Infinity && this.flips;
     let w = 0;
 
     // ── tier 1: single numbers, input order
-    if (sumMin <= 1) {
+    if (kmin <= 1) {
       const val = this.val;
       const flips = this.flips;
       for (let i = 0; i < this.n; i++) {
@@ -539,7 +556,7 @@ class Engine {
     this.fracTotal = Math.max(1, base3 + total3);
 
     // ── tier 2: pairs. For entry p, partners q > p with E[q] in [lo − E[p], hi − E[p]].
-    if (sumMin <= 2 && capTotal >= 2) {
+    if (kmin <= 2 && capTotal >= 2) {
       let a = N; // first index with E ≥ lo − x  (moves left as x grows)
       let b = N - 1; // last index with E ≤ hi − x (moves left as x grows)
       for (let p = 0; p < N - 1; p++) {
@@ -557,6 +574,7 @@ class Engine {
           }
           const iq = I[q];
           if (iq === ip) continue;
+          if (limitFlips && (G[p] < 0 ? 1 : 0) + (G[q] < 0 ? 1 : 0) > mf) continue;
           if (checkLimits && !this.fits(ip, iq, -1)) continue;
           if (this.emit([ip, iq], [G[p], G[q]], x + E[q])) return 'maxResults';
         }
@@ -566,7 +584,7 @@ class Engine {
     if (kmax < 3) return 'exhausted';
 
     // ── tier 3: triples. For p, two pointers over (q, r), q < r, E[q] + E[r] in [L, H].
-    if (sumMin <= 3 && capTotal >= 3) {
+    if (kmin <= 3 && capTotal >= 3) {
       for (let p = 0; p < N - 2; p++) {
         this.fracDone = base3 + p * N - (p * (p + 1)) / 2;
         const x = E[p];
@@ -603,6 +621,7 @@ class Engine {
             if (xz <= tol && xz >= -tol) continue;
             const yz = y + z;
             if (yz <= tol && yz >= -tol) continue;
+            if (limitFlips && (G[p] < 0 ? 1 : 0) + (G[q] < 0 ? 1 : 0) + (G[r] < 0 ? 1 : 0) > mf) continue;
             if (checkLimits && !this.fits(ip, iq, ir)) continue;
             if (this.emit([ip, iq, ir], [G[p], G[q], G[r]], xy + z)) return 'maxResults';
           }
@@ -631,9 +650,8 @@ class Engine {
       return u;
     };
 
-    for (let k = 4; k <= kmax; k++) {
+    for (let k = Math.max(4, kmin); k <= kmax; k++) {
       if (k > capTotal) break;
-      if (sumMin > k) continue;
       const minK = pre[k];
       const maxK = pre[N] - pre[N - k];
       if (minK > hi || maxK < lo) {
@@ -645,6 +663,7 @@ class Engine {
       const S = new Float64Array(k + 1);
       const took = new Uint8Array(k);
       let deficit = sumMin;
+      let fl = 0; // −1 signs taken so far
       let d = 0;
       cur[0] = firstIndex(0, 0, k) - 1;
       for (;;) {
@@ -659,6 +678,7 @@ class Engine {
           const f = file[it];
           cnt[f]--;
           if (cnt[f] < minF[f]) deficit++;
+          if (G[cur[d]] < 0) fl--;
           took[d] = 0;
         }
         const i = cur[d] + 1;
@@ -674,6 +694,7 @@ class Engine {
         const f = file[it];
         if (cnt[f] >= maxF[f]) continue;
         if (deficit === r && cnt[f] >= minF[f]) continue; // remaining picks must fill file minimums
+        if (limitFlips && G[i] < 0 && fl >= mf) continue; // no more numbers may count as negative
         const x = E[i];
         let bad = false;
         for (let q = 0; q < d; q++) {
@@ -704,6 +725,7 @@ class Engine {
         used[it] = 1;
         if (cnt[f] < minF[f]) deficit--;
         cnt[f]++;
+        if (G[i] < 0) fl++;
         took[d] = 1;
         S[d + 1] = S[d] + x;
         cur[d + 1] = firstIndex(i + 1, S[d + 1], r - 1) - 1;

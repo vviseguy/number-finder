@@ -45,6 +45,21 @@ describe('parseLimit (per-file limit in a group)', () => {
   });
 });
 
+test('madeOf and negatives labels cover exactly, between, at least, and a cap on negatives', async () => {
+  const { madeOfLabel, madeOfPhrase, negativesLabel } = await import('./format');
+  expect(madeOfLabel(3)).toBe('sums of up to 3');
+  expect(madeOfLabel(3, 3)).toBe('sums of exactly 3');
+  expect(madeOfLabel(4, 2)).toBe('sums of 2 to 4');
+  expect(madeOfLabel(null, 2)).toBe('sums of 2 or more');
+  expect(madeOfLabel(null)).toBe('any sum');
+  expect(madeOfPhrase(3, 3)).toBe('as a sum of exactly 3 numbers');
+  expect(madeOfPhrase(null, 2)).toBe('as a sum of 2 or more numbers');
+  expect(negativesLabel(false, 1)).toBe('');
+  expect(negativesLabel(true)).toBe('negatives');
+  expect(negativesLabel(true, 1)).toBe('up to 1 negative');
+  expect(negativesLabel(true, 2)).toBe('up to 2 negatives');
+});
+
 test('formatMoney uses a true minus and respects whole dollars', () => {
   expect(formatMoney(3234.56)).toBe('3,234.56');
   expect(formatMoney(3235, 0)).toBe('3,235');

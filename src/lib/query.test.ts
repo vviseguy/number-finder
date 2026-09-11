@@ -60,14 +60,26 @@ describe('parseQuery', () => {
     expect(checkToken('Return')).toBe('check:Return');
   });
   test('sums:, tolerance, and negatives', () => {
-    expect(parseQuery('3,235 sums:3').maxCount).toBe(3);
+    expect(parseQuery('3,235 sums:3')).toMatchObject({ maxCount: 3, minCount: undefined });
     expect(parseQuery('3,235 sums:any').maxCount).toBeNull();
     expect(parseQuery('3,235 sum:1').maxCount).toBe(1);
     expect(parseQuery('3,235 sums:lots').errors[0]).toContain('sums:3');
     expect(parseQuery('3,235 ±0.50').tolerance).toBe(0.5);
-    expect(parseQuery('3,235 neg').negatives).toBe(true);
+    expect(parseQuery('3,235 neg')).toMatchObject({ negatives: true, maxFlips: undefined });
     expect(parseQuery('3,235 negatives:off').negatives).toBe(false);
     expect(parseQuery('3,235').maxCount).toBeUndefined();
+  });
+  test('sums of exactly, between, and at least; at most N negatives', () => {
+    expect(parseQuery('3,235 sums:=3')).toMatchObject({ maxCount: 3, minCount: 3 });
+    expect(parseQuery('3,235 sums:=1')).toMatchObject({ maxCount: 1, minCount: undefined });
+    expect(parseQuery('3,235 sums:2..4')).toMatchObject({ maxCount: 4, minCount: 2 });
+    expect(parseQuery('3,235 sums:1..4')).toMatchObject({ maxCount: 4, minCount: undefined });
+    expect(parseQuery('3,235 sums:2+')).toMatchObject({ maxCount: null, minCount: 2 });
+    expect(parseQuery('3,235 sums:4..2').errors[0]).toContain('sums:2..4');
+    expect(parseQuery('3,235 neg:1')).toMatchObject({ negatives: true, maxFlips: 1 });
+    expect(parseQuery('3,235 neg:0')).toMatchObject({ negatives: false, maxFlips: undefined });
+    expect(parseQuery('3,235 negatives:2')).toMatchObject({ negatives: true, maxFlips: 2 });
+    expect(parseQuery('3,235 neg:lots').errors[0]).toContain('neg:1');
   });
 });
 

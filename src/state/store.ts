@@ -21,9 +21,9 @@ import { extractFile } from '../extract';
 import { SearchPool } from '../engine/pool';
 import { forgetPdf, getPdfjs } from '../lib/pdf';
 import { download } from '../lib/exporter';
-import { canOpenFolder, folderPermission, forgetFolderHandle, loadFolderHandle, pickFolder, readFolder, saveFolderHandle, type DirHandle } from '../lib/folder';
-import { parseSetup, serializeSetup, SETUP_FILE_NAME, type SavedRun, type SavedSetup } from '../lib/setupfile';
-import { formatMoney, madeOfLabel, parseLimit, plural, roundingPhrase, uid } from '../lib/format';
+import { canOpenFolder, canPickSaveLocation, folderPermission, forgetFolderHandle, loadFolderHandle, pickFolder, readFolder, saveFolderHandle, saveTextAs, type DirHandle } from '../lib/folder';
+import { isSetupText, parseSetup, sameSetup, serializeSetup, SETUP_FILE_NAME, type SavedRun, type SavedSetup } from '../lib/setupfile';
+import { formatMoney, madeOfLabel, negativesLabel, parseLimit, plural, roundingPhrase, uid } from '../lib/format';
 import { checkToken, hasTerms, normalizeTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, termText, type Terms } from '../lib/query';
 import { SORT_LABEL, sortMatches, type ItemInfo, type ResultSort } from '../lib/rank';
 import { shortNames } from '../lib/names';
@@ -36,6 +36,8 @@ const PANE_KEY = 'number-finder:pane';
 const GROUP_COLORS = 6;
 const READ_TIMEOUT_MS = 60_000;
 export const MIN_PANE = 320;
+/** When the setup (groups, short names, options, searches) last changed; a folder's setup file loads only if newer. */
+let setupAt = 0;
 
 // ---------- state shape ----------
 
@@ -58,8 +60,14 @@ export interface FileEntry {
 export interface GroupMember { key: string; name: string; limit: string }
 export interface Group { id: string; name: string; color: number; members: GroupMember[] }
 
-/** groupId is the group searched IN. tolerance, when set, replaces the rounding preset for that run. */
-export interface FindSettings { groupId: string; maxCount: number | null; rounding: Rounding; allowFlips: boolean; tolerance?: number }
+/**
+ * groupId is the group searched IN. minCount (default 1) with maxCount = "sums of exactly N" or a range;
+ * maxFlips (default no limit) caps how many numbers may count as negative; tolerance, when set, replaces
+ * the rounding preset for that run.
+ */
+export interface FindSettings {
+  groupId: string; maxCount: number | null; minCount?: number; rounding: Rounding; allowFlips: boolean; maxFlips?: number; tolerance?: number;
+}
 
 type RunStatus = 'idle' | 'running' | 'done' | 'stopped';
 
@@ -163,10 +171,14 @@ function emit() {
   queueMicrotask(() => { emitQueued = false; for (const l of listeners) l(); });
 }
 
+const runSig = (runs: Run[]) => runs.map(r => `${r.id}:${r.version}`).join();
+
 function set(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
   const prev = state;
   state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
   if (state.files !== prev.files) refreshLabels();
+  if (state.groups !== prev.groups || state.nicks !== prev.nicks || state.find !== prev.find || state.resultSort !== prev.resultSort
+    || (state.runs !== prev.runs && runSig(state.runs) !== runSig(prev.runs))) setupAt = Date.now();
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => { persistTimer = undefined; saveSetup(); }, 300);
   emit();
@@ -236,7 +248,9 @@ function loadSetup(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
-    return { ...base, ...setupToState(JSON.parse(raw) as SavedSetup) };
+    const saved = JSON.parse(raw) as SavedSetup;
+    setupAt = saved.changedAt ?? 0;
+    return { ...base, ...setupToState(saved) };
   } catch {
     return base;
   }
@@ -247,16 +261,44 @@ function currentSetup(): SavedSetup {
   const runs: SavedRun[] = state.runs.slice(0, 30).map(r => (r.kind === 'check'
     ? { kind: 'check', checkGroupId: r.checkGroupId, settings: r.settings, terms: r.terms }
     : { kind: 'search', target: r.target, targetDecimals: r.targetDecimals, range: r.range, settings: r.settings, terms: r.terms }));
-  return { groups: state.groups, nicks: state.nicks, find: state.find, resultSort: state.resultSort, runs, folder: state.folder?.name };
+  return { groups: state.groups, nicks: state.nicks, find: state.find, resultSort: state.resultSort, runs, folder: state.folder?.name, changedAt: setupAt };
 }
 
 function saveSetup() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentSetup())); } catch { /* storage full or blocked: setup just isn't remembered */ }
 }
 
-/** "Save setup": the same setup as a file, to keep or hand to someone with the documents. */
-export function saveSetupFile() {
-  download(new Blob([serializeSetup(currentSetup())], { type: 'application/json' }), SETUP_FILE_NAME);
+/** Replaces groups, short names, options, and searches with a setup; returns what to tell the person. */
+function applySetup(setup: SavedSetup, sourceName: string): string {
+  for (const r of state.runs) stopRun(r.id);
+  set({ ...setupToState(setup), selectedRunId: null, previewId: null });
+  const loaded = new Set(state.files.map(f => f.key));
+  const missing = new Set(state.groups.flatMap(g => g.members).filter(m => !loaded.has(m.key)).map(m => m.key)).size;
+  const what = `${plural(state.groups.length, 'group')} and ${plural(state.runs.length, 'search', 'searches')}`;
+  const where = missing ? ` ${plural(missing, 'file')} still to add${setup.folder ? ` (they came from the folder “${setup.folder}”)` : ''}.` : '';
+  return `Setup loaded from ${sourceName}: ${what}.${where}`;
+}
+
+/**
+ * "Save setup": the setup as a file, to keep or hand to someone with the documents. With a remembered
+ * folder (and a browser that has the dialog), the Save dialog opens in that folder, so the file lands
+ * next to the documents and loads with them next time; otherwise the file is downloaded.
+ */
+export async function saveSetupFile() {
+  const text = serializeSetup(currentSetup());
+  if (canPickSaveLocation && state.folder) {
+    try {
+      const h = await loadFolderHandle();
+      if (h) {
+        const name = await saveTextAs(text, SETUP_FILE_NAME, h);
+        if (name) notify('info', `Setup saved as ${name}. Kept in ${h.name}, it loads with the folder next time.`);
+        return;
+      }
+    } catch (err) {
+      console.warn('Save dialog failed; downloading instead', err);
+    }
+  }
+  download(new Blob([text], { type: 'application/json' }), SETUP_FILE_NAME);
 }
 
 /** "Load setup" (or a setup file dropped on the page): replaces groups, short names, options, and searches. */
@@ -266,14 +308,29 @@ export async function loadSetupFile(file: File): Promise<boolean> {
     notify('error', `${file.name}: ${err instanceof Error ? err.message : 'could not be read.'}`);
     return false;
   }
-  for (const r of state.runs) stopRun(r.id);
-  set({ ...setupToState(setup), selectedRunId: null, previewId: null });
-  const loaded = new Set(state.files.map(f => f.key));
-  const missing = new Set(state.groups.flatMap(g => g.members).filter(m => !loaded.has(m.key)).map(m => m.key)).size;
-  const what = `${plural(state.groups.length, 'group')} and ${plural(state.runs.length, 'search', 'searches')}`;
-  const where = missing ? ` ${plural(missing, 'file')} still to add${setup.folder ? ` (they came from the folder “${setup.folder}”)` : ''}.` : '';
-  notify('info', `Setup loaded from ${file.name}: ${what}.${where}`);
+  notify('info', applySetup(setup, file.name));
   return true;
+}
+
+/**
+ * A setup file found in the folder: loaded when it is newer than the current setup (so a file saved from
+ * here, or brought by someone else, wins over what this computer remembers, but not the other way round).
+ */
+async function loadFolderSetup(files: File[], folderName: string): Promise<string> {
+  let best: { setup: SavedSetup; name: string } | null = null;
+  for (const f of files) {
+    const text = await f.text();
+    if (!isSetupText(text)) continue;
+    try {
+      const { setup } = parseSetup(text);
+      if (!best || (setup.changedAt ?? 0) > (best.setup.changedAt ?? 0)) best = { setup, name: f.name };
+    } catch (err) {
+      console.warn(`${f.name} looks like a setup file but couldn't be read`, err);
+    }
+  }
+  if (!best || sameSetup(best.setup, currentSetup())) return '';
+  if ((best.setup.changedAt ?? 0) > setupAt) return applySetup(best.setup, `${best.name} in ${folderName}`);
+  return `${best.name} in ${folderName} is older than the setup on this computer, so it wasn't loaded (Load setup… uses it anyway).`;
 }
 
 // Saves are debounced; flush the pending one when the page is closed, reloaded, or hidden.
@@ -354,8 +411,10 @@ export function groupsOfFile(s: AppState, key: string): Group[] {
 
 /** "in Source docs · sums of up to 3 · whole dollars · negatives · skipping “hours”" */
 export function runSummary(s: AppState, r: { settings: FindSettings; terms: Terms }): string {
-  const parts = [`in ${groupName(s, r.settings.groupId)}`, madeOfLabel(r.settings.maxCount), roundingPhrase(r.settings.rounding, r.settings.tolerance)];
-  if (r.settings.allowFlips) parts.push('negatives');
+  const st = r.settings;
+  const parts = [`in ${groupName(s, st.groupId)}`, madeOfLabel(st.maxCount, st.minCount), roundingPhrase(st.rounding, st.tolerance)];
+  const neg = negativesLabel(st.allowFlips, st.maxFlips);
+  if (neg) parts.push(neg);
   const t = termsPhrase(r.terms);
   if (t) parts.push(t);
   return parts.join(' · ');
@@ -473,11 +532,13 @@ const FOLDER_EXTENSIONS = ['.pdf', '.xlsx', '.xlsm', '.xls', '.ods', '.csv', '.t
 async function readFromFolder(h: DirHandle) {
   set({ folder: { name: h.name, status: 'reading' } });
   try {
+    const setupNote = await loadFolderSetup(await readFolder(h, ['.json'], 20, 1), h.name);
     const files = await readFolder(h, FOLDER_EXTENSIONS);
     set({ folder: { name: h.name, status: 'ready' } });
-    if (!files.length) { notify('warn', `There are no PDF, Excel, or CSV files in ${h.name}.`); return; }
+    if (!files.length) { notify('warn', `There are no PDF, Excel, or CSV files in ${h.name}.${setupNote ? ` ${setupNote}` : ''}`); return; }
     const added = await addFiles(files, true);
-    notify('info', added ? `Read ${plural(added, 'file')} from ${h.name}.` : `The ${plural(files.length, 'file')} in ${h.name} were already added.`);
+    const filesNote = added ? `Read ${plural(added, 'file')} from ${h.name}.` : `The ${plural(files.length, 'file')} in ${h.name} were already added.`;
+    notify('info', [filesNote, setupNote].filter(Boolean).join(' '));
   } catch (err) {
     console.error(err);
     set({ folder: { name: h.name, status: 'gone' } });
@@ -658,7 +719,8 @@ const sameList = (a: string[], b: string[]) => a.length === b.length && a.every(
 const sameTerms = (a: Terms, b: Terms) =>
   sameList(a.include, b.include) && sameList(a.exclude, b.exclude) && sameList(a.fuzzy, b.fuzzy) && sameList(a.prefer, b.prefer);
 const sameSettings = (a: FindSettings, b: FindSettings) =>
-  a.groupId === b.groupId && a.maxCount === b.maxCount && a.rounding === b.rounding && a.allowFlips === b.allowFlips && (a.tolerance ?? -1) === (b.tolerance ?? -1);
+  a.groupId === b.groupId && a.maxCount === b.maxCount && (a.minCount ?? 1) === (b.minCount ?? 1) && a.rounding === b.rounding
+  && a.allowFlips === b.allowFlips && (a.maxFlips ?? -1) === (b.maxFlips ?? -1) && (a.tolerance ?? -1) === (b.tolerance ?? -1);
 const close = (a: number, b: number) => Math.abs(a - b) < 0.005;
 
 /** The search for this number (or range), whichever version it's on. */
@@ -686,8 +748,8 @@ export function submitFind(): boolean {
     if (!id) { notify('error', noGroup(q.inGroup)); return false; }
     settings.groupId = id;
   }
-  if (q.maxCount !== undefined) settings.maxCount = q.maxCount;
-  if (q.negatives !== undefined) settings.allowFlips = q.negatives;
+  if (q.maxCount !== undefined) { settings.maxCount = q.maxCount; settings.minCount = q.minCount; }
+  if (q.negatives !== undefined) { settings.allowFlips = q.negatives; settings.maxFlips = q.negatives ? q.maxFlips : undefined; }
   if (q.tolerance !== undefined) settings.tolerance = q.tolerance;
 
   if (q.checkGroup !== null) {
@@ -777,8 +839,10 @@ function buildRequest(
   }
   return {
     target,
+    minCount: range ? 1 : Math.min(settings.minCount ?? 1, settings.maxCount ?? Infinity),
     maxCount: range ? 1 : settings.maxCount,
     allowFlips: settings.allowFlips,
+    maxFlips: settings.allowFlips ? settings.maxFlips ?? null : null,
     tolerance: range ? (range.hi - range.lo) / 2 : settings.tolerance ?? ROUNDING_TOLERANCE[settings.rounding],
     candidates,
     limits,

@@ -59,6 +59,7 @@ test('the three steps are the navigation, and the theme can be pinned', async ({
   expect(await theme()).toBe('system');
   await page.locator('.theme-toggle').click();
   expect(await theme()).toBe('light');
+  await expect(page.locator('.topbar')).toHaveCSS('background-color', 'rgb(246, 245, 241)'); // warm paper, not pure white
   await page.locator('.theme-toggle').click();
   expect(await theme()).toBe('dark');
   await page.screenshot({ path: path.join(SHOTS, '02-dark-pinned.png') });
@@ -168,7 +169,7 @@ test('the bar grammar: "quotes", ~close, \'text, and +- becomes ±', async ({ pa
 
 test('sums show as an equation that opens into the full breakdown, with −( ) for negatives', async ({ page }) => {
   await open(page, ['workpapers.xlsx']);
-  await page.getByLabel('Match').selectOption('sums');
+  await page.getByLabel('Match').selectOption('upto');
   await page.getByLabel('Most numbers in a sum').fill('2');
   await page.getByLabel('Negatives').selectOption('on');
   await page.getByLabel('Rounding').selectOption('exact');
@@ -227,11 +228,74 @@ test('the search area keeps its state between pages; an empty bar shows the hist
   await expect(page.locator('.search-row')).toHaveCount(1);
   await expect(page.locator('.main-empty')).toContainText('Pick a search from the history');
   await expect(page.locator('.notice')).toHaveCount(0);
-  const history = (await page.locator('.find-main > .searches').boundingBox())!;
-  const main = (await page.locator('.find-main').boundingBox())!;
-  expect(Math.abs((history.x - main.x) - (main.x + main.width - history.x - history.width))).toBeLessThan(2); // centred
+  const offCentre = await page.evaluate(() => { // inside the column's content box (the scrollbar gutter doesn't count)
+    const m = document.querySelector('.find-main')!;
+    const h = m.querySelector('.searches')!.getBoundingClientRect();
+    const box = m.getBoundingClientRect();
+    return Math.abs((h.left - box.left) - (box.left + m.clientWidth - h.right));
+  });
+  expect(offCentre).toBeLessThan(2); // centred
   await page.locator('.search-row .search-main').first().click();
   await expect(page.locator('.results')).toBeVisible();
+});
+
+test('sums of exactly N, from the bar and the pill', async ({ page }) => {
+  await open(page, SOURCES);
+  await find(page, '90,235 sums:=3'); // wages + interest + dividends = 90,234.56, whole dollars
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3');
+  await expect(page.locator('.combo-title').first()).toContainText('Sum of 3 amounts');
+  await expect(page.locator('.result-list > .result-row')).toHaveCount(0); // no single numbers in "exactly" mode
+  await find(page, '90,235 sums:=2');
+  await expect(page.locator('.not-found')).toContainText('as a sum of exactly 2 numbers');
+  await page.getByRole('button', { name: 'Try sums of up to 2' }).click();
+  await expect(page.locator('.search-row').first()).toContainText('sums of up to 2');
+  await page.getByLabel('Match').selectOption('exact');
+  await expect(page.locator('.opt', { hasText: 'Match' }).locator('.sum-size')).toHaveValue('2');
+  await page.getByLabel('Most numbers in a sum').fill('3');
+  await find(page, '90,235');
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3');
+});
+
+test('at most N numbers counted as negative', async ({ page }) => {
+  await open(page, ['workpapers.xlsx']);
+  await page.getByLabel('Rounding').selectOption('exact');
+  await page.getByLabel('Match').selectOption('exact');
+  await page.getByLabel('Most numbers in a sum').fill('2');
+  await page.getByLabel('Negatives').selectOption('upto');
+  await expect(page.locator('.opt', { hasText: 'Negatives' }).locator('.sum-size')).toHaveValue('1');
+  await find(page, '3,234.56'); // 3,500.00 − 265.44
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 2 · exact · up to 1 negative');
+  await expect(page.locator('.combo-title').first()).toContainText('1 counted as negative');
+  await find(page, '3,234.56 neg:0'); // no pair without a negative
+  await expect(page.locator('.not-found')).toBeVisible();
+  await expect(page.locator('.search-row').first()).not.toContainText('negative');
+  await find(page, '3,234.56 neg:1');
+  await expect(page.locator('.combo-title').first()).toContainText('1 counted as negative');
+  await page.screenshot({ path: path.join(SHOTS, '10-exactly-negatives.png') });
+});
+
+test('dragging the splitter scales the drawn page instead of redrawing it on every pixel', async ({ page }) => {
+  await open(page, ['W-2.pdf']);
+  await find(page, '85,000');
+  await expect(page.locator('.side-pane canvas')).toBeVisible();
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    const w = window as unknown as { __redraws: number };
+    w.__redraws = 0;
+    const mo = new MutationObserver(ms => { w.__redraws += ms.filter(m => m.attributeName === 'width').length; });
+    document.querySelectorAll('.side-pane canvas').forEach(c => mo.observe(c, { attributes: true }));
+  });
+  const handle = (await page.locator('.splitter').boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 220, handle.y + 200, { steps: 40 });
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(() => (window as unknown as { __redraws: number }).__redraws)).toBeLessThanOrEqual(2);
+  const canvasW = (await page.locator('.side-pane canvas').boundingBox())!.width;
+  const bodyW = (await page.locator('.side-pane .preview-body').boundingBox())!.width;
+  expect(bodyW - canvasW).toBeLessThan(60); // drawn again for the wider pane once the drag settled
+  await expect(page.locator('.side-pane .hotspot.hit')).toBeVisible();
 });
 
 test('the option pills are one dropdown each, with the sum size inside the Match pill', async ({ page }) => {
@@ -241,7 +305,7 @@ test('the option pills are one dropdown each, with the sum size inside the Match
   const pill = (await match.boundingBox())!;
   const sel = (await match.locator('select').boundingBox())!;
   expect(Math.abs(sel.width - pill.width)).toBeLessThan(3); // the select covers the whole pill, so a click anywhere opens it
-  await page.getByLabel('Match').selectOption('sums');
+  await page.getByLabel('Match').selectOption('upto');
   await expect(match.locator('.sum-size + .pick-chev')).toHaveCount(1); // …Sums of up to [3] ▾
   const negatives = page.locator('.opt', { hasText: 'Negatives' });
   expect((await negatives.boundingBox())!.width).toBeLessThan(130);
@@ -398,7 +462,7 @@ test('check: looks up every number in a group against another', async ({ page })
   await expect(page.locator('.searchbar .where .sentence')).toHaveText('against');
   await expect(page.locator('.searchbar .where .pick-text')).toContainText('Source docs');
   await expect(page.locator('.query-echo')).toContainText('Every number in 2025 return will be looked up against Source docs');
-  await page.getByLabel('Match').selectOption('sums');
+  await page.getByLabel('Match').selectOption('upto');
   await page.getByLabel('Most numbers in a sum').fill('3');
   await page.getByRole('button', { name: 'Search' }).click();
 

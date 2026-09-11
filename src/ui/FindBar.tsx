@@ -7,6 +7,7 @@ import type { Rounding } from '../types';
 import { Pick } from './Pick';
 
 const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.json';
+const MAX_NEGATIVES = 20;
 
 export function chooseFiles() { document.getElementById('file-input')?.click(); }
 export function chooseSetup() { document.getElementById('setup-input')?.click(); }
@@ -25,11 +26,29 @@ function hints(groups: string[]): string[] {
     '3,235 85,000  ·  two numbers, two searches',
     '3,200..3,300  ·  every number in a range',
     '3,235 sums:3  ·  sums of up to 3 numbers',
+    '3,235 sums:=3  ·  sums of exactly 3 numbers',
     '3,235 ±0.50  ·  within 50 cents (type +-)',
     '3,235 neg  ·  let numbers count as negative',
+    '3,235 neg:1  ·  at most one number counted as negative',
     `3,235 in:${/\s/.test(g) ? `"${g}"` : g}  ·  look in a group by name`,
     `${checkToken(g2)}  ·  look up every number in a group`,
   ];
+}
+
+/** A small whole-number box inside a pill (the sum size, the most negatives). */
+function CountBox({ value, min, max, label, onChange }: { value: number; min: number; max: number; label: string; onChange: (n: number) => void }) {
+  return (
+    <input
+      type="number"
+      className="sum-size"
+      min={min}
+      max={max}
+      step={1}
+      value={value}
+      aria-label={label}
+      onChange={e => onChange(Number(e.target.value))}
+    />
+  );
 }
 
 /**
@@ -62,7 +81,7 @@ export function FindBar() {
       : [q.numbers.length > 1 ? `${q.numbers.length} numbers: each is its own search.` : '', termsSentence(q.terms)].filter(Boolean).join(' '));
   const echoBad = q.errors.length > 0 || (checking && (!checkId || checkId === ALL_FILES || q.numbers.length > 0 || !!q.range));
 
-  // A new search (title or step 3 clicked, or Search on an empty bar) puts the cursor in the bar.
+  // A new search (Search on an empty bar, or "Check every number…" on a group) puts the cursor in the bar.
   useEffect(() => { if (s.barFocus) input.current?.focus(); }, [s.barFocus]);
 
   // After "+-" was folded into "±", put the caret back where it was.
@@ -79,9 +98,28 @@ export function FindBar() {
     return () => clearInterval(t);
   }, [s.findText, focused, HINTS.length]);
 
+  // Match: 1 number · sums of up to N · sums of exactly N · any sum. The size box is shared by the two "sums of" choices.
   const sums = typeof f.maxCount === 'number' && f.maxCount > 1;
+  const exact = sums && f.minCount === f.maxCount;
+  const matchMode = f.maxCount === 1 ? '1' : f.maxCount === null ? 'any' : exact ? 'exact' : 'upto';
   const [sumSize, setSumSize] = useState(sums ? f.maxCount as number : 3);
   useEffect(() => { if (typeof f.maxCount === 'number' && f.maxCount > 1) setSumSize(f.maxCount); }, [f.maxCount]);
+  const setMatch = (mode: string, n: number) => {
+    if (mode === '1') setFind({ maxCount: 1, minCount: undefined });
+    else if (mode === 'any') setFind({ maxCount: null, minCount: undefined });
+    else if (mode === 'exact') setFind({ maxCount: n, minCount: n });
+    else setFind({ maxCount: n, minCount: undefined });
+  };
+
+  // Negatives: off · on (any number of them) · up to N of them.
+  const negMode = !f.allowFlips ? 'off' : f.maxFlips === undefined ? 'on' : 'upto';
+  const [negSize, setNegSize] = useState(f.maxFlips ?? 1);
+  useEffect(() => { if (f.maxFlips !== undefined) setNegSize(f.maxFlips); }, [f.maxFlips]);
+  const setNegatives = (mode: string, n: number) => {
+    if (mode === 'off') setFind({ allowFlips: false, maxFlips: undefined });
+    else if (mode === 'on') setFind({ allowFlips: true, maxFlips: undefined });
+    else setFind({ allowFlips: true, maxFlips: n });
+  };
 
   return (
     <section className="strip" aria-label="Search">
@@ -125,25 +163,23 @@ export function FindBar() {
         <span className="opt" title={MADE_OF_HINT}>
           <span className="opt-name">Match</span>
           <Pick
-            value={f.maxCount === 1 ? '1' : f.maxCount === null ? 'any' : 'sums'}
+            value={matchMode}
             label="Match"
-            options={[{ value: '1', label: '1 number' }, { value: 'sums', label: 'Sums of up to' }, { value: 'any', label: 'Any sum' }]}
-            onChange={v => setFind({ maxCount: v === '1' ? 1 : v === 'any' ? null : sumSize })}
+            options={[
+              { value: '1', label: '1 number' },
+              { value: 'upto', label: 'Sums of up to' },
+              { value: 'exact', label: 'Sums of exactly' },
+              { value: 'any', label: 'Any sum' },
+            ]}
+            onChange={v => setMatch(v, sumSize)}
           >
             {sums && (
-              <input
-                type="number"
-                className="sum-size"
+              <CountBox
+                value={sumSize}
                 min={MIN_SUM_SIZE}
                 max={MAX_SUM_SIZE}
-                step={1}
-                value={sumSize}
-                aria-label="Most numbers in a sum"
-                onChange={e => {
-                  const n = Number(e.target.value);
-                  setSumSize(n);
-                  if (Number.isInteger(n) && n >= MIN_SUM_SIZE && n <= MAX_SUM_SIZE) setFind({ maxCount: n });
-                }}
+                label="Most numbers in a sum"
+                onChange={n => { setSumSize(n); if (Number.isInteger(n) && n >= MIN_SUM_SIZE && n <= MAX_SUM_SIZE) setMatch(matchMode, n); }}
               />
             )}
           </Pick>
@@ -157,14 +193,28 @@ export function FindBar() {
             onChange={v => setFind({ rounding: v as Rounding, tolerance: undefined })}
           />
         </span>
-        <span className="opt" title="Let any number count as negative, e.g. a penalty that reduces interest">
+        <span className="opt" title="Let numbers count as negative, e.g. a penalty that reduces interest — all of them, or at most a few">
           <span className="opt-name">Negatives</span>
           <Pick
-            value={f.allowFlips ? 'on' : 'off'}
+            value={negMode}
             label="Negatives"
-            options={[{ value: 'off', label: 'off' }, { value: 'on', label: 'also try negatives', short: 'on' }]}
-            onChange={v => setFind({ allowFlips: v === 'on' })}
-          />
+            options={[
+              { value: 'off', label: 'off' },
+              { value: 'on', label: 'any number of them', short: 'on' },
+              { value: 'upto', label: 'at most…', short: 'up to' },
+            ]}
+            onChange={v => setNegatives(v, negSize)}
+          >
+            {negMode === 'upto' && (
+              <CountBox
+                value={negSize}
+                min={1}
+                max={MAX_NEGATIVES}
+                label="Most numbers counted as negative"
+                onChange={n => { setNegSize(n); if (Number.isInteger(n) && n >= 1 && n <= MAX_NEGATIVES) setNegatives('upto', n); }}
+              />
+            )}
+          </Pick>
         </span>
       </div>
       <input

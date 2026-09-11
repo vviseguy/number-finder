@@ -16,9 +16,33 @@ export interface DirHandle {
   requestPermission(o: { mode: 'read' }): Promise<PermissionState>;
 }
 type Picker = (o?: { id?: string; mode?: 'read' | 'readwrite' }) => Promise<DirHandle>;
+interface WritableFileHandle { createWritable(): Promise<{ write(data: Blob | string): Promise<void>; close(): Promise<void> }> }
+type SavePicker = (o?: { id?: string; suggestedName?: string; startIn?: DirHandle | string; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<WritableFileHandle>;
 
 const picker = (): Picker | undefined => (typeof window === 'undefined' ? undefined : (window as unknown as { showDirectoryPicker?: Picker }).showDirectoryPicker);
+const savePicker = (): SavePicker | undefined => (typeof window === 'undefined' ? undefined : (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker);
 export const canOpenFolder = !!picker();
+export const canPickSaveLocation = !!savePicker();
+
+/**
+ * Save text through the browser's own "Save as" dialog, opened in the given folder when there is one.
+ * Returns the chosen file name, null when the person cancelled. Throws when the API isn't there.
+ */
+export async function saveTextAs(text: string, suggestedName: string, startIn?: DirHandle): Promise<string | null> {
+  const show = savePicker();
+  if (!show) throw new Error('no save picker');
+  let handle: WritableFileHandle & { name?: string };
+  try {
+    handle = await show({ id: 'number-finder-setup', suggestedName, startIn: startIn ?? 'documents', types: [{ description: 'Number finder setup', accept: { 'application/json': ['.json'] } }] });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return null;
+    throw err;
+  }
+  const w = await handle.createWritable();
+  await w.write(text);
+  await w.close();
+  return handle.name ?? suggestedName;
+}
 
 const DB = 'number-finder';
 const STORE = 'handles';
@@ -71,15 +95,15 @@ export async function folderPermission(h: DirHandle, ask: boolean): Promise<Perm
 
 const skip = (name: string) => name.startsWith('.') || name.startsWith('~$');
 
-/** Every file with one of the extensions, this folder and its subfolders (a few levels), at most `max`. */
-export async function readFolder(h: DirHandle, extensions: string[], max = 500): Promise<File[]> {
+/** Every file with one of the extensions, this folder and its subfolders (`maxDepth` levels down), at most `max`. */
+export async function readFolder(h: DirHandle, extensions: string[], max = 500, maxDepth = 4): Promise<File[]> {
   const out: File[] = [];
   const wanted = new Set(extensions.map(e => e.toLowerCase()));
   const walk = async (dir: DirHandle, depth: number) => {
     for await (const entry of dir.values()) {
       if (out.length >= max) return;
       if (skip(entry.name)) continue;
-      if (entry.kind === 'directory') { if (depth < 4) await walk(entry, depth + 1); continue; }
+      if (entry.kind === 'directory') { if (depth < maxDepth) await walk(entry, depth + 1); continue; }
       const ext = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
       if (wanted.has(ext)) out.push(await entry.getFile());
     }

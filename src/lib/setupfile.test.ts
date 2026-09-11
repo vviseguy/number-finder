@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { isSetupText, parseSetup, serializeSetup, type SavedSetup } from './setupfile';
+import { isSetupText, parseSetup, sameSetup, serializeSetup, type SavedSetup } from './setupfile';
 
 const setup: SavedSetup = {
   groups: [{ id: 'g1', name: 'Source docs', color: 0, members: [{ key: 'W-2.pdf|1234', name: 'W-2.pdf', limit: '1' }] }],
@@ -15,8 +15,14 @@ describe('setup files', () => {
     const text = serializeSetup(setup);
     expect(isSetupText(text)).toBe(true);
     const back = parseSetup(text);
-    expect(back.setup).toEqual(setup);
+    expect(back.setup).toEqual({ ...setup, changedAt: expect.any(Number) }); // changedAt falls back to the save time
     expect(back.savedAt).toMatch(/^\d{4}-/);
+    const stamped = parseSetup(serializeSetup({ ...setup, changedAt: 1234 }));
+    expect(stamped.setup.changedAt).toBe(1234);
+  });
+  test('sameSetup ignores the timestamps and the folder name', () => {
+    expect(sameSetup(setup, { ...setup, changedAt: 99, folder: 'Elsewhere' })).toBe(true);
+    expect(sameSetup(setup, { ...setup, nicks: {} })).toBe(false);
   });
   test('rejects other files with a plain message', () => {
     expect(() => parseSetup('not json')).toThrow("isn't a Number finder setup file");

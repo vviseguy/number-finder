@@ -20,17 +20,18 @@ Between sessions it remembers your **setup** — group names, which file names b
 
 - **Open folder…** (Edge and Chrome) reads every PDF, Excel, and CSV file in a folder and its subfolders, and remembers the folder. Next time, the page reads it again by itself if the browser has kept the permission, and otherwise shows a *Reopen folder* button that takes one click. The folder's handle is kept in the browser's own storage on this computer; the files are read fresh each time and never stored. *Forget folder* drops it.
 - **Save setup** writes `Number finder setup.json` — the groups, short names, options, and searches, not the documents — and **Load setup…** reads one back. Dropping the file anywhere on the page does the same, so a setup can travel with a folder of documents or be handed to someone else.
+- **The two together.** With a folder open, *Save setup* opens the Save dialog in that folder, and a setup file kept there loads with the folder: when the folder is opened or reopened, the newest setup file in it (top level or one folder down) is loaded if it's newer than the setup this computer remembers. An older one is left alone, with a note saying so; *Load setup…* uses it anyway. So the folder becomes the whole job: documents plus setup, ready on any computer.
 
 ## Using it
 
-The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three views; switching between them keeps whatever is loaded in the search area. The drop target sits at the right of the header, and the search bar under the header is on every view. The sun/moon button at the top right pins light or dark mode (it follows your system until you do). The handle between the results and the pane on the right drags to resize it.
+The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three views; switching between them keeps whatever is loaded in the search area. The drop target sits at the right of the header, and the search bar under the header is on every view. The sun/moon button at the top right pins light or dark mode (it follows your system until you do); light mode is a warm paper tone rather than pure white. The handle between the results and the pane on the right drags to resize it; the page in the pane scales while you drag and is drawn again once you let go.
 
 1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. Long file names are shortened to what tells them apart: words that appear in every file's name are replaced by `…`, so *Alpha Client 2025 Bank Statement Jan.pdf* shows as `Alpha…Jan.pdf` next to its Beta and February siblings, with the full name underneath and in tooltips. The pencil sets your own short name instead, remembered for next time. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
 3. **Find.** Type a number in the search bar (or click any number in a preview) and press Enter; *in* picks the group to look in. The query stays in the bar, and selecting a search in the history loads it back. Under the bar:
-   - **Match:** *1 number* (where does it appear?), *Sums of up to* a number you set (2 to 20), or *Any sum*. Exact matches of the number itself always show first.
+   - **Match:** *1 number* (where does it appear?), *Sums of up to* a number you set (2 to 20), *Sums of exactly* that many, or *Any sum*. Exact matches of the number itself show first, except in *exactly* mode, which leaves single numbers out.
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
-   - **Negatives:** *also try negatives* lets any number count as negative.
+   - **Negatives:** *off*, *on* (any number of them may count as negative), or *up to* a number you set, so a sum can use one penalty but not turn half the numbers around.
 
    **The bar's grammar** (the empty bar shows these in turn). Words are matched against a number's label, its column and sheet, and its file name, never minding case:
    | Type | Means |
@@ -44,9 +45,9 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
    | `3,235 '2025` | `'` reads 2025 as text instead of an amount, and lists the numbers that mention it first (it doesn't filter); `-'2025` skips them |
    | `3,235 in:Source` | look in the group whose name starts with "Source" (quotes for spaces) |
    | `check:"2025 return"` | look up every number in that group (see below) |
-   | `3,235 sums:3` | sums of up to 3 numbers; `sums:any`, `sums:1` |
+   | `3,235 sums:3` | sums of up to 3 numbers; `sums:=3` exactly 3; `sums:2..4` between 2 and 4; `sums:2+` at least 2; `sums:any`; `sums:1` |
    | `3,235 ±0.50` or `~0.50` | within 50 cents; typing `+-` or `-+` in the bar turns into `±` |
-   | `3,235 neg` | let numbers count as negative |
+   | `3,235 neg` | let numbers count as negative; `neg:1` at most one of them; `neg:0` none |
 
    Words like `in:`, `sums:`, `±`, and `neg` override the pills for that one search. Filters apply before the search, so a skipped number can never be part of a sum.
 

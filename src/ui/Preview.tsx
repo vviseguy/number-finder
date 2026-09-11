@@ -53,25 +53,50 @@ export function Preview({ amountId, navIds = [], navNoun = 'Match', onNavigate }
 
 // ---------- PDF page ----------
 
+/** A drawn page: the viewport its hotspots are placed with, and the width it was drawn for. */
+interface Drawn { vp: PageViewport; page: number; width: number; height: number }
+
 function PdfPage({ file, page, highlight }: { file: FileEntry; page: number; highlight: Amount }) {
   const wrap = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
-  const [viewport, setViewport] = useState<PageViewport | null>(null);
+  const [drawn, setDrawn] = useState<Drawn | null>(null);
   const [failed, setFailed] = useState(false);
+  const drawnRef = useRef<Drawn | null>(null);
 
+  // Follow the wrap's width — but settle first. While the pane is being dragged, the page already drawn
+  // is only scaled (stage transform), and it's drawn again 150 ms after the width stops changing. Drawing
+  // on every pixel of a drag blanked the canvas over and over and made the scrollbar come and go.
   useLayoutEffect(() => {
     const el = wrap.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
+    const st = stage.current;
+    if (!el || !st) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let first = true;
+    const ro = new ResizeObserver(([e]) => {
+      const w = Math.round(e.contentRect.width);
+      if (w < 50) return;
+      const d = drawnRef.current;
+      if (d && d.width !== w) {
+        const k = w / d.width;
+        st.style.transform = `scale(${k})`;
+        el.style.height = `${Math.round(d.height * k)}px`;
+      }
+      clearTimeout(timer);
+      if (first || !d) { first = false; setWidth(w); return; }
+      timer = setTimeout(() => setWidth(w), 150);
+    });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { clearTimeout(timer); ro.disconnect(); };
   }, []);
 
   useEffect(() => {
     const data = fileData.get(file.id);
     const el = canvas.current;
-    if (!data || !el || width < 50) return;
+    const st = stage.current;
+    const wr = wrap.current;
+    if (!data || !el || !st || !wr || width < 50) return;
     let cancelled = false;
     let task: { cancel(): void; promise: Promise<void> } | null = null;
     (async () => {
@@ -82,21 +107,34 @@ function PdfPage({ file, page, highlight }: { file: FileEntry; page: number; hig
         const scale = width / p.getViewport({ scale: 1 }).width;
         const dpr = window.devicePixelRatio || 1;
         const vp = p.getViewport({ scale: scale * dpr });
-        el.width = Math.floor(vp.width);
-        el.height = Math.floor(vp.height);
-        el.style.width = `${width}px`;
-        el.style.height = `${Math.floor(vp.height / dpr)}px`;
-        const ctx = el.getContext('2d');
-        if (!ctx) return;
-        task = p.render({ canvas: el, canvasContext: ctx, viewport: vp } as Parameters<typeof p.render>[0]);
+        // Draw off screen, then swap in one step, so the old page stays up until the new one is ready.
+        const off = document.createElement('canvas');
+        off.width = Math.floor(vp.width);
+        off.height = Math.floor(vp.height);
+        const offCtx = off.getContext('2d');
+        if (!offCtx) return;
+        task = p.render({ canvas: off, canvasContext: offCtx, viewport: vp } as Parameters<typeof p.render>[0]);
         await task.promise;
-        if (!cancelled) { setViewport(p.getViewport({ scale })); setFailed(false); }
+        if (cancelled) return;
+        const height = Math.floor(vp.height / dpr);
+        el.width = off.width;
+        el.height = off.height;
+        el.style.width = `${width}px`;
+        el.style.height = `${height}px`;
+        el.getContext('2d')?.drawImage(off, 0, 0);
+        st.style.transform = '';
+        wr.style.height = '';
+        const d: Drawn = { vp: p.getViewport({ scale }), page, width, height };
+        drawnRef.current = d;
+        setDrawn(d);
+        setFailed(false);
       } catch (err) {
         if (!cancelled && !(err instanceof Error && err.name === 'RenderingCancelledException')) { console.error(err); setFailed(true); }
       }
     })();
     return () => { cancelled = true; task?.cancel(); };
   }, [file.id, page, width]);
+  const viewport = drawn && drawn.page === page ? drawn.vp : null;
 
   const onPage = useMemo(
     () => (file.parsed?.amounts ?? []).filter(a => a.location.kind === 'pdf' && a.location.page === page),
@@ -117,17 +155,19 @@ function PdfPage({ file, page, highlight }: { file: FileEntry; page: number; hig
 
   return (
     <div className="pdf-page" ref={wrap}>
-      <canvas ref={canvas} aria-label={`${file.name}, page ${page}`} />
+      <div className="pdf-stage" ref={stage}>
+        <canvas ref={canvas} aria-label={`${file.name}, page ${page}`} />
+        {viewport && onPage.map(a => {
+          if (a.location.kind !== 'pdf') return null;
+          const [x, y, w, h] = a.location.box;
+          const [x1, y1] = viewport.convertToViewportPoint(x, y) as [number, number];
+          const [x2, y2] = viewport.convertToViewportPoint(x + w, y + h) as [number, number];
+          const style = { left: Math.min(x1, x2) - 2, top: Math.min(y1, y2) - 2, width: Math.abs(x2 - x1) + 4, height: Math.abs(y2 - y1) + 4 };
+          const isHit = a.id === highlight.id;
+          return <Hotspot key={a.id} amount={a} isHit={isHit} style={style} hitRef={isHit ? hitRef : undefined} />;
+        })}
+      </div>
       {failed && <p className="warn-line pad">This page couldn't be drawn, but its numbers were read.</p>}
-      {viewport && onPage.map(a => {
-        if (a.location.kind !== 'pdf') return null;
-        const [x, y, w, h] = a.location.box;
-        const [x1, y1] = viewport.convertToViewportPoint(x, y) as [number, number];
-        const [x2, y2] = viewport.convertToViewportPoint(x + w, y + h) as [number, number];
-        const style = { left: Math.min(x1, x2) - 2, top: Math.min(y1, y2) - 2, width: Math.abs(x2 - x1) + 4, height: Math.abs(y2 - y1) + 4 };
-        const isHit = a.id === highlight.id;
-        return <Hotspot key={a.id} amount={a} isHit={isHit} style={style} hitRef={isHit ? hitRef : undefined} />;
-      })}
     </div>
   );
 }

@@ -72,18 +72,28 @@ export const MIN_SUM_SIZE = 2;
 export const MAX_SUM_SIZE = 20;
 export const MADE_OF_HINT = 'How many numbers may add up to it. Exact matches of the number itself always show first.';
 
-/** Short form for summaries: "1 number", "sums of up to 3", "any sum". */
-export function madeOfLabel(n: number | null): string {
-  if (n === 1) return '1 number';
-  if (n === null) return 'any sum';
-  return `sums of up to ${n}`;
+/** Short form for summaries: "1 number", "sums of up to 3", "sums of exactly 3", "sums of 2 to 4", "sums of 2 or more", "any sum". */
+export function madeOfLabel(max: number | null, min = 1): string {
+  if (max === 1) return '1 number';
+  if (max === null) return min > 1 ? `sums of ${min} or more` : 'any sum';
+  if (min === max) return `sums of exactly ${max}`;
+  if (min > 1) return `sums of ${min} to ${max}`;
+  return `sums of up to ${max}`;
 }
 
 /** For sentences: "Nothing makes 9,120 as a single number or a sum of up to 3 numbers". */
-export function madeOfPhrase(n: number | null): string {
-  if (n === 1) return 'as a single number';
-  if (n === null) return 'as a single number or any sum';
-  return `as a single number or a sum of up to ${n} numbers`;
+export function madeOfPhrase(max: number | null, min = 1): string {
+  if (max === 1) return 'as a single number';
+  if (max === null) return min > 1 ? `as a sum of ${min} or more numbers` : 'as a single number or any sum';
+  if (min === max) return `as a sum of exactly ${max} numbers`;
+  if (min > 1) return `as a sum of ${min} to ${max} numbers`;
+  return `as a single number or a sum of up to ${max} numbers`;
+}
+
+/** "negatives", "up to 1 negative", or '' when numbers may not count as negative. */
+export function negativesLabel(allow: boolean, maxFlips?: number): string {
+  if (!allow) return '';
+  return maxFlips === undefined ? 'negatives' : `up to ${plural(maxFlips, 'negative')}`;
 }
 
 export const KIND_LABEL: Record<FileKind, string> = { pdf: 'PDF', excel: 'Excel', csv: 'CSV' };
