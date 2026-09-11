@@ -1,11 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconSearch, IconX } from '@tabler/icons-react';
 import { addFiles, ALL_FILES, clearFindText, groupById, groupByText, groupName, loadSetupFile, setFind, setFindText, submitFind, useAppState } from '../state/store';
-import { MADE_OF_HINT, MAX_SUM_SIZE, MIN_SUM_SIZE, ROUNDING_LABEL, ROUNDING_SHORT } from '../lib/format';
+import {
+  CHECK_SECONDS, DEFAULT_CHECK_SECONDS, MADE_OF_HINT, MAX_SUM_SIZE, MIN_SUM_SIZE, ROUNDING_LABEL, ROUNDING_SHORT, SEARCH_SECONDS, secondsLabel,
+} from '../lib/format';
+import { searchSecondsOf } from '../state/store';
 import { checkToken, foldPlusMinus, parseQuery, termsSentence } from '../lib/query';
 import { GROUPING_HINT, GROUPING_LABEL, GROUPING_SHORT, GROUPINGS, groupingOf, type Grouping } from '../lib/rank';
 import type { Rounding } from '../types';
 import { Pick } from './Pick';
+import { SizeNote } from './Narrow';
 
 const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.json';
 const MAX_NEGATIVES = 20;
@@ -29,6 +33,7 @@ function hints(groups: string[]): string[] {
     '3,235 sums:3  ·  sums of up to 3 numbers',
     '3,235 sums:=3  ·  sums of exactly 3 numbers',
     '3,235 sums:3 mode:clumped  ·  sums of numbers next to each other',
+    '3,235 sums:any time:5m  ·  let a big search run for 5 minutes',
     '3,235 ±0.50  ·  within 50 cents (type +-)',
     '3,235 neg  ·  let numbers count as negative',
     '3,235 neg:1  ·  at most one number counted as negative',
@@ -50,6 +55,38 @@ function CountBox({ value, min, max, label, onChange }: { value: number; min: nu
       aria-label={label}
       onChange={e => onChange(Number(e.target.value))}
     />
+  );
+}
+
+/**
+ * Sums only. A search: "Time limit" (10 s … No limit). A group check: "Time per number". A value typed in
+ * the bar (time:45s) that isn't one of the choices is shown as its own choice.
+ */
+function TimePill({ checking }: { checking: boolean }) {
+  const f = useAppState().find;
+  if (checking) {
+    const cur = f.checkSeconds ?? DEFAULT_CHECK_SECONDS;
+    const choices = CHECK_SECONDS.includes(cur) ? CHECK_SECONDS : [...CHECK_SECONDS, cur].sort((a, b) => a - b);
+    return (
+      <span className="opt" title="A group check searches each of its numbers in turn; this is how long each one may take">
+        <span className="opt-name">Time per number</span>
+        <Pick value={String(cur)} label="Time per number" options={choices.map(x => ({ value: String(x), label: secondsLabel(x) }))} onChange={v => setFind({ checkSeconds: Number(v) })} />
+      </span>
+    );
+  }
+  const cur = searchSecondsOf(f);
+  const nums = SEARCH_SECONDS.filter((x): x is number => x !== null);
+  const choices: (number | null)[] = cur === null || nums.includes(cur) ? SEARCH_SECONDS : [...[...nums, cur].sort((a, b) => a - b), null];
+  return (
+    <span className="opt" title="How long a sum search may run before it stops and shows what it found. With no limit it runs until it has tried everything, or until you press Stop.">
+      <span className="opt-name">Time limit</span>
+      <Pick
+        value={cur === null ? 'none' : String(cur)}
+        label="Time limit"
+        options={choices.map(x => (x === null ? { value: 'none', label: 'No limit (until you stop it)', short: 'none' } : { value: String(x), label: secondsLabel(x) }))}
+        onChange={v => setFind({ seconds: v === 'none' ? null : Number(v) })}
+      />
+    </span>
   );
 }
 
@@ -197,6 +234,7 @@ export function FindBar() {
             />
           </span>
         )}
+        {f.maxCount !== 1 && <TimePill checking={checking} />}
         <span className="opt" title="How close a match has to be">
           <span className="opt-name">Rounding</span>
           <Pick
@@ -230,6 +268,7 @@ export function FindBar() {
           </Pick>
         </span>
       </div>
+      <SizeNote />
       <input
         id="file-input"
         type="file"

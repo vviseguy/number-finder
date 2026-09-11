@@ -69,6 +69,17 @@ describe('parseQuery', () => {
     expect(parseQuery('3,235 negatives:off').negatives).toBe(false);
     expect(parseQuery('3,235').maxCount).toBeUndefined();
   });
+  test('time: sets how long a sum search may run', () => {
+    expect(parseQuery('3,235 time:45').seconds).toBe(45);
+    expect(parseQuery('3,235 time:45s').seconds).toBe(45);
+    expect(parseQuery('3,235 time:2m').seconds).toBe(120);
+    expect(parseQuery('3,235 time:1.5min').seconds).toBe(90);
+    expect(parseQuery('3,235 time:1h').seconds).toBe(3600);
+    expect(parseQuery('3,235 time:none').seconds).toBeNull();
+    expect(parseQuery('3,235').seconds).toBeUndefined();
+    expect(parseQuery('3,235 time:soon').errors[0]).toContain('time:30s');
+    expect(parseQuery('3,235 time:2m').numbers.map(n => n.value)).toEqual([3235]);
+  });
   test('mode: sets the search mode for sums', () => {
     expect(parseQuery('3,235 mode:clumped').grouping).toBe('clumped');
     expect(parseQuery('3,235 mode:clump').grouping).toBe('clumped');
@@ -116,6 +127,12 @@ test('describing and re-serializing terms', () => {
   expect(termsSentence(u)).toBe('Only numbers that mention something close to “intrest”, skipping numbers that mention “hours”. Numbers that mention “2025” are listed first.');
   expect(serializeTerms(u)).toBe("~intrest '2025 -hours");
   expect(parseQuery(serializeTerms(u)).terms).toEqual(u);
+});
+
+test('dropTokens takes words out of the bar, keeping quoted phrases whole', async () => {
+  const { dropTokens } = await import('./query');
+  expect(dropTokens('90,235 sums:any neg in:"Source docs" -"hourly rate"', t => /^sums?:/i.test(t) || /^in:/i.test(t))).toBe('90,235 neg -"hourly rate"');
+  expect(dropTokens('  3,235   -hours ', () => false)).toBe('3,235 -hours');
 });
 
 test('foldPlusMinus turns +- and -+ into ± and keeps the caret in place', () => {

@@ -321,6 +321,57 @@ test('search mode: shown only for sums, and it decides which groupings come firs
   await expect(modePill).toHaveCount(0);
 });
 
+test('time limit: a pill for sums, a note when a search runs out of time, and a way to search longer', async ({ page }) => {
+  await open(page, [...SOURCES, ...RETURN]);
+  const time = page.locator('.opt', { hasText: 'Time limit' });
+  await expect(time).toHaveCount(0); // "to number" finishes at once
+  await page.getByLabel('Match', { exact: true }).selectOption('any');
+  await expect(time.locator('.pick-text')).toHaveText('30 s');
+
+  await find(page, '12,345.67 ±0 neg time:1s'); // any count with negatives: far more than a second's work
+  const note = page.locator('.search-note');
+  await expect(note).toContainText('Stopped at the 1 s time limit', { timeout: 15_000 });
+  await expect(page.locator('.search-row').first()).toContainText('1 s limit');
+  await expect(time.locator('.pick-text')).toHaveText('1 s'); // a typed time shows as its own choice
+
+  await note.getByRole('button', { name: 'Search again for 10 s' }).click();
+  await expect(page.locator('.version-bar')).toContainText('Version 2');
+  const running = page.locator('.search-note.running');
+  await expect(running).toContainText('of 10 s');
+  await running.getByRole('button', { name: 'Stop' }).click();
+  await expect(note).toContainText('Stopped after');
+
+  await page.getByLabel('Time limit').selectOption('none');
+  await expect(time.locator('.pick-text')).toHaveText('none');
+  await page.screenshot({ path: path.join(SHOTS, '12-time-limit.png') });
+});
+
+test('a big search is flagged before it runs, with one-click ways to narrow it', async ({ page }) => {
+  await open(page, [...SOURCES, ...RETURN]);
+  await makeGroup(page, 'Source docs', SOURCES);
+  await tab(page, 'Find').click();
+  await page.locator('#find-input').fill('90,235');
+  const note = page.locator('.size-note');
+  await expect(note).toHaveCount(0); // "to number": nothing to warn about
+  await page.getByLabel('Match', { exact: true }).selectOption('any');
+  await page.getByLabel('Negatives').selectOption('on');
+  await expect(note).toContainText('Big search');
+  await expect(note).toContainText('longer than a lifetime');
+  await expect(note).toContainText('by coincidence');
+  await expect(note.getByRole('button', { name: /^In Source docs · \d+ numbers$/ })).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '13-size-note.png') });
+
+  await note.getByRole('button', { name: 'Sums of up to 3' }).click();
+  await expect(page.locator('.opt', { hasText: 'Match' }).locator('.pick-text')).toHaveText('to sum · up to');
+  await expect(note.filter({ hasText: 'longer than a lifetime' })).toHaveCount(0); // small enough now (the note may be gone altogether)
+
+  // A typed word that overrides a pill comes out of the bar when a button changes that setting.
+  await page.locator('#find-input').fill('90,235 sums:any');
+  await expect(note).toContainText('longer than a lifetime');
+  await note.getByRole('button', { name: 'Sums of up to 3' }).click();
+  await expect(page.locator('#find-input')).toHaveValue('90,235');
+});
+
 test('the preview names the file in large type, with where in it underneath', async ({ page }) => {
   await open(page, ['1099-INT.pdf', 'workpapers.xlsx']);
   await page.getByLabel('Rounding').selectOption('exact');

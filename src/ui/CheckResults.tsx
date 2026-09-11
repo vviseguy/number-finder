@@ -65,7 +65,7 @@ export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boole
   const done = run.rows.length - counts.pending;
   const checkName = groupName(s, run.checkGroupId);
   const againstName = groupName(s, run.settings.groupId);
-  const settingsText = `Each number in ${checkName} is looked up ${runSummary(s, run)}`;
+  const settingsText = `Each number in ${checkName} is looked up ${runSummary(s, { ...run, kind: 'check' })}`;
   const skipped = [
     run.skippedByTerms > 0 && `${plural(run.skippedByTerms, 'number')} skipped by the filters`,
     run.skippedZeros > 0 && `${plural(run.skippedZeros, 'zero amount')} skipped`,

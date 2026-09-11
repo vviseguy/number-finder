@@ -60,6 +60,23 @@ test('madeOf and negatives labels cover exactly, between, at least, and a cap on
   expect(negativesLabel(true, 2)).toBe('up to 2 negatives');
 });
 
+test('time limits read naturally and step up', async () => {
+  const { secondsLabel, longerSeconds, elapsedLabel } = await import('./format');
+  expect(secondsLabel(45)).toBe('45 s');
+  expect(secondsLabel(120)).toBe('2 min');
+  expect(secondsLabel(90)).toBe('1 min 30 s');
+  expect(secondsLabel(3600)).toBe('1 h');
+  expect(secondsLabel(null)).toBe('no limit');
+  expect(longerSeconds(1)).toBe(10);
+  expect(longerSeconds(30)).toBe(120);
+  expect(longerSeconds(600)).toBeNull();
+  expect(longerSeconds(null)).toBeUndefined();
+  expect(elapsedLabel(400)).toBe('0.4 s');
+  expect(elapsedLabel(8_400)).toBe('8.4 s');
+  expect(elapsedLabel(42_900)).toBe('42 s');
+  expect(elapsedLabel(65_000)).toBe('1 min 05 s');
+});
+
 test('locationLong reads well as a heading', async () => {
   const { locationLong } = await import('./format');
   const at = (location: Amount['location']) => ({ id: 'f:0', fileId: 'f', value: 1, text: '1', label: '', decimals: 0, location }) as Amount;

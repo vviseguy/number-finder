@@ -90,6 +90,35 @@ export function madeOfPhrase(max: number | null, min = 1): string {
   return `as a single number or a sum of up to ${max} numbers`;
 }
 
+// How long a sum search may run. Single numbers finish at once, so these only matter for sums.
+// null = no limit: the search runs until it has tried everything or is stopped.
+export const SEARCH_SECONDS: (number | null)[] = [10, 30, 120, 600, null];
+export const DEFAULT_SEARCH_SECONDS = 30;
+/** A group check searches each of its numbers in turn; this is the time each one gets. */
+export const CHECK_SECONDS = [2, 10, 30, 120];
+export const DEFAULT_CHECK_SECONDS = 2;
+
+/** "45 s", "2 min", "1 min 30 s", "1 h", "no limit". */
+export function secondsLabel(s: number | null): string {
+  if (s === null) return 'no limit';
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return s % 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s / 60} min`;
+  return `${+(s / 3600).toFixed(1)} h`;
+}
+
+/** The next longer choice after `s` (null = no limit is the longest), or undefined when there is none. */
+export function longerSeconds(s: number | null, choices: (number | null)[] = SEARCH_SECONDS): number | null | undefined {
+  if (s === null) return undefined;
+  return choices.find(c => c === null || c > s);
+}
+
+/** Elapsed time for progress lines: "0.4 s", "8.4 s", "42 s", "1 min 05 s". */
+export function elapsedLabel(ms: number): string {
+  if (ms < 10_000) return `${(Math.max(0, ms) / 1000).toFixed(1)} s`;
+  const s = Math.floor(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+}
+
 /** "negatives", "up to 1 negative", or '' when numbers may not count as negative. */
 export function negativesLabel(allow: boolean, maxFlips?: number): string {
   if (!allow) return '';

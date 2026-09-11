@@ -14,6 +14,7 @@
 //   3,235 ±0.50  or  ~0.50   within 50 cents (~ before a number is a tolerance, before a word a fuzzy match)
 //   3,235 neg                let numbers count as negative; neg:1 at most one of them; neg:0 none
 //   3,235 mode:clumped       search mode for sums: mode:clumped, mode:spread, mode:across (see lib/rank.ts)
+//   3,235 time:2m            how long a sum search may run: time:45s, time:2m, time:1h, time:none
 // A minus directly before a digit is a negative number ("-265.44"), not a filter. Filters apply before
 // the search, so a skipped number can never be part of a sum.
 
@@ -59,6 +60,8 @@ export interface Query {
   maxFlips: number | undefined;
   /** Search mode for sums (mode:clumped); undefined when not given. */
   grouping: Grouping | undefined;
+  /** Time limit in seconds (time:2m); null = no limit (time:none); undefined when not given. */
+  seconds: number | null | undefined;
   errors: string[];
 }
 
@@ -67,7 +70,7 @@ const TOKEN = /[^\s"]*"[^"]*"?|\S+/g;
 export function parseQuery(text: string): Query {
   const q: Query = {
     numbers: [], range: null, terms: emptyTerms(), inGroup: null, checkGroup: null,
-    maxCount: undefined, minCount: undefined, tolerance: undefined, negatives: undefined, maxFlips: undefined, grouping: undefined, errors: [],
+    maxCount: undefined, minCount: undefined, tolerance: undefined, negatives: undefined, maxFlips: undefined, grouping: undefined, seconds: undefined, errors: [],
   };
   const unquote = (s: string) => s.replace(/^"|"$/g, '').trim();
   const add = (list: string[], word: string) => { if (word && !list.includes(word)) list.push(word); };
@@ -99,6 +102,16 @@ export function parseQuery(text: string): Query {
       else if ((r = /^(\d+)\.\.(\d+)$/.exec(v)) && +r[1] >= 1 && +r[2] >= +r[1]) { q.minCount = +r[1] > 1 ? +r[1] : undefined; q.maxCount = +r[2]; }
       else if ((r = /^(\d+)\+$/.exec(v)) && +r[1] >= 1) { q.minCount = +r[1] > 1 ? +r[1] : undefined; q.maxCount = null; }
       else q.errors.push(`"${raw}" should be sums:3, sums:=3 (exactly), sums:2..4, sums:2+, or sums:any.`);
+      continue;
+    }
+
+    m = /^(?:time|limit):(.+)$/i.exec(raw);
+    if (m) {
+      const v = m[1].toLowerCase();
+      const t = /^(\d+(?:\.\d+)?)(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)?$/.exec(v);
+      if (v === 'none' || v === 'off' || v === 'no' || v === 'any') q.seconds = null;
+      else if (t && +t[1] > 0) q.seconds = Math.max(1, Math.round(+t[1] * (t[2]?.startsWith('h') ? 3600 : t[2]?.startsWith('m') ? 60 : 1)));
+      else q.errors.push(`"${raw}" should be like time:30s, time:2m, or time:none.`);
       continue;
     }
 
@@ -216,6 +229,14 @@ export function serializeTerms(t: Terms): string {
     ...t.prefer.map(s => `'${w(s)}`),
     ...t.exclude.map(s => `-${w(s)}`),
   ].join(' ');
+}
+
+/**
+ * The bar text without the tokens `drop` picks out, e.g. taking `sums:any` away when a button sets the
+ * number of numbers (a typed word would otherwise keep overriding the button).
+ */
+export function dropTokens(text: string, drop: (raw: string) => boolean): string {
+  return (String(text ?? '').match(TOKEN) ?? []).filter(t => !drop(t)).join(' ');
 }
 
 /** `check:"2025 return"`: the group name as it goes in the bar. */

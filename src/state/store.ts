@@ -23,8 +23,10 @@ import { forgetPdf, getPdfjs } from '../lib/pdf';
 import { download } from '../lib/exporter';
 import { canOpenFolder, canPickSaveLocation, folderPermission, forgetFolderHandle, loadFolderHandle, pickFolder, readFolder, saveFolderHandle, saveTextAs, type DirHandle } from '../lib/folder';
 import { isSetupText, parseSetup, sameSetup, serializeSetup, SETUP_FILE_NAME, type SavedRun, type SavedSetup } from '../lib/setupfile';
-import { formatMoney, madeOfLabel, negativesLabel, parseLimit, plural, roundingPhrase, uid } from '../lib/format';
-import { checkToken, hasTerms, normalizeTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, termText, type Terms } from '../lib/query';
+import {
+  CHECK_SECONDS, DEFAULT_CHECK_SECONDS, DEFAULT_SEARCH_SECONDS, formatMoney, madeOfLabel, negativesLabel, parseLimit, plural, roundingPhrase, secondsLabel, uid,
+} from '../lib/format';
+import { checkToken, hasTerms, normalizeTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, termText, type Query, type Terms } from '../lib/query';
 import { DEFAULT_GROUPING, GROUPING_SHORT, groupingOf, SORT_LABEL, sortMatches, type Grouping, type ItemInfo, type ResultSort } from '../lib/rank';
 import { shortNames } from '../lib/names';
 
@@ -67,10 +69,18 @@ export interface Group { id: string; name: string; color: number; members: Group
  */
 export interface FindSettings {
   groupId: string; maxCount: number | null; minCount?: number; rounding: Rounding; allowFlips: boolean; maxFlips?: number; grouping?: Grouping; tolerance?: number;
+  /** How long a sum search may run, in seconds; null = no limit; undefined = the default. */
+  seconds?: number | null;
+  /** How long each number of a group check may be searched, in seconds; undefined = the default. */
+  checkSeconds?: number;
 }
 
 /** The search mode that applies to a run: only sums have one. */
 const modeOf = (st: FindSettings): Grouping | undefined => (st.maxCount === 1 ? undefined : groupingOf(st));
+export const searchSecondsOf = (st: FindSettings): number | null => (st.seconds === undefined ? DEFAULT_SEARCH_SECONDS : st.seconds);
+export const checkSecondsOf = (st: FindSettings): number => st.checkSeconds ?? DEFAULT_CHECK_SECONDS;
+/** "No limit" still needs a number for the engine: a day. */
+const NO_LIMIT_MS = 86_400_000;
 
 type RunStatus = 'idle' | 'running' | 'done' | 'stopped';
 
@@ -412,13 +422,18 @@ export function groupsOfFile(s: AppState, key: string): Group[] {
   return s.groups.filter(g => g.members.some(m => m.key === key));
 }
 
-/** "in Source docs · sums of up to 3 · whole dollars · negatives · skipping “hours”" */
-export function runSummary(s: AppState, r: { settings: FindSettings; terms: Terms }): string {
+/** "in Source docs · sums of up to 3, across files · whole dollars · negatives · 2 min limit · skipping “hours”" */
+export function runSummary(s: AppState, r: { settings: FindSettings; terms: Terms; kind?: Run['kind'] }): string {
   const st = r.settings;
   const mode = modeOf(st);
   const parts = [`in ${groupName(s, st.groupId)}`, `${madeOfLabel(st.maxCount, st.minCount)}${mode ? `, ${GROUPING_SHORT[mode]}` : ''}`, roundingPhrase(st.rounding, st.tolerance)];
   const neg = negativesLabel(st.allowFlips, st.maxFlips);
   if (neg) parts.push(neg);
+  if (st.maxCount !== 1) {
+    if (r.kind === 'check') { if (checkSecondsOf(st) !== DEFAULT_CHECK_SECONDS) parts.push(`${secondsLabel(checkSecondsOf(st))} per number`); }
+    else if (searchSecondsOf(st) === null) parts.push('no time limit');
+    else if (searchSecondsOf(st) !== DEFAULT_SEARCH_SECONDS) parts.push(`${secondsLabel(searchSecondsOf(st))} limit`);
+  }
   const t = termsPhrase(r.terms);
   if (t) parts.push(t);
   return parts.join(' · ');
@@ -703,11 +718,31 @@ export function checkGroup(groupId: string) {
   }));
 }
 
-function currentSettings(): FindSettings {
-  const g = state.find.groupId;
-  const { tolerance: _drop, ...rest } = state.find;
+/**
+ * The settings a search from the bar would use: the option pills, with the bar's words (in:, sums:, neg,
+ * mode:, time:, ±) laid over them. An in: group that doesn't exist leaves the pill's group (submitFind
+ * reports it). Used by Search and by the size note under the bar, so both see the same search.
+ */
+export function settingsFor(s: AppState, q: Query): FindSettings {
+  const g = s.find.groupId;
+  const { tolerance: _drop, ...rest } = s.find;
   void _drop;
-  return { ...rest, groupId: g === ALL_FILES || groupById(state, g) ? g : ALL_FILES };
+  const st: FindSettings = { ...rest, groupId: g === ALL_FILES || groupById(s, g) ? g : ALL_FILES };
+  if (q.inGroup !== null) { const id = groupByText(s, q.inGroup); if (id) st.groupId = id; }
+  if (q.maxCount !== undefined) { st.maxCount = q.maxCount; st.minCount = q.minCount; }
+  if (q.negatives !== undefined) { st.allowFlips = q.negatives; st.maxFlips = q.negatives ? q.maxFlips : undefined; }
+  if (q.grouping !== undefined) st.grouping = q.grouping;
+  if (q.seconds !== undefined) {
+    // In a group check the time is per number, so "no limit" becomes the longest per-number choice.
+    if (q.checkGroup !== null) st.checkSeconds = q.seconds ?? CHECK_SECONDS[CHECK_SECONDS.length - 1];
+    else st.seconds = q.seconds;
+  }
+  if (q.tolerance !== undefined) st.tolerance = q.tolerance;
+  return st;
+}
+
+function currentSettings(): FindSettings {
+  return settingsFor(state, parseQuery(''));
 }
 
 /** What the search bar shows for a run: its number(s) or check:Group, and its filter words. */
@@ -727,7 +762,8 @@ const sameTerms = (a: Terms, b: Terms) =>
 const sameSettings = (a: FindSettings, b: FindSettings) =>
   a.groupId === b.groupId && a.maxCount === b.maxCount && (a.minCount ?? 1) === (b.minCount ?? 1) && a.rounding === b.rounding
   && a.allowFlips === b.allowFlips && (a.maxFlips ?? -1) === (b.maxFlips ?? -1) && (a.tolerance ?? -1) === (b.tolerance ?? -1)
-  && modeOf(a) === modeOf(b);
+  && modeOf(a) === modeOf(b)
+  && (a.maxCount === 1 || (searchSecondsOf(a) === searchSecondsOf(b) && checkSecondsOf(a) === checkSecondsOf(b)));
 const close = (a: number, b: number) => Math.abs(a - b) < 0.005;
 
 /** The search for this number (or range), whichever version it's on. */
@@ -748,17 +784,9 @@ export function submitFind(): boolean {
   const q = parseQuery(state.findText);
   if (q.errors.length) { notify('error', q.errors[0]); return false; }
   if (!state.findText.trim()) { newSearch(); return true; }
-  const settings = currentSettings();
   const noGroup = (name: string) => `No group is called "${name}". Groups: ${state.groups.map(g => g.name).join(', ') || 'none yet (step 2)'}.`;
-  if (q.inGroup !== null) {
-    const id = groupByText(state, q.inGroup);
-    if (!id) { notify('error', noGroup(q.inGroup)); return false; }
-    settings.groupId = id;
-  }
-  if (q.maxCount !== undefined) { settings.maxCount = q.maxCount; settings.minCount = q.minCount; }
-  if (q.negatives !== undefined) { settings.allowFlips = q.negatives; settings.maxFlips = q.negatives ? q.maxFlips : undefined; }
-  if (q.grouping !== undefined) settings.grouping = q.grouping;
-  if (q.tolerance !== undefined) settings.tolerance = q.tolerance;
+  if (q.inGroup !== null && !groupByText(state, q.inGroup)) { notify('error', noGroup(q.inGroup)); return false; }
+  const settings = settingsFor(state, q);
 
   if (q.checkGroup !== null) {
     const checkGroupId = groupByText(state, q.checkGroup);
@@ -860,10 +888,15 @@ function buildRequest(
 
 // ---------- single searches ----------
 
-// Sums collect more matches than they show first, so the search mode has real choices to put on top.
+// Sums collect more matches than they show first, so the search mode has real choices to put on top,
+// and run for the time limit the person chose (single numbers finish at once).
 const SEARCH_BUDGET = { maxResults: 50, timeLimitMs: 10_000 };
-const SUM_BUDGET = { maxResults: 150, timeLimitMs: 10_000 };
-const budgetFor = (st: FindSettings) => (st.maxCount === 1 ? SEARCH_BUDGET : SUM_BUDGET);
+export const SUM_MAX_RESULTS = 150;
+function budgetFor(st: FindSettings) {
+  if (st.maxCount === 1) return SEARCH_BUDGET;
+  const sec = searchSecondsOf(st);
+  return { maxResults: SUM_MAX_RESULTS, timeLimitMs: sec === null ? NO_LIMIT_MS : sec * 1000 };
+}
 
 const snapshot = (r: Run): Version => ({ at: r.at, run: { ...r, history: [], viewing: null } });
 
@@ -997,7 +1030,9 @@ function launchCheck(base: CheckRun, isNew: boolean): boolean {
   }));
 
   // A row keeps its best 3 matches; sums collect a few more first so the search mode can choose among them.
-  const budget = { maxResults: base.settings.maxCount === 1 ? CHECK_KEEP : 12, timeLimitMs: base.settings.maxCount === null ? 3000 : 1500 };
+  const budget = base.settings.maxCount === 1
+    ? { maxResults: CHECK_KEEP, timeLimitMs: 1500 }
+    : { maxResults: 12, timeLimitMs: checkSecondsOf(base.settings) * 1000 };
   for (const a of nonZero) {
     const request = buildRequest(state, base.settings, a.value, a.id, base.terms, budget);
     if (typeof request === 'string') { onCheckRow(run.id, a.id, []); continue; }

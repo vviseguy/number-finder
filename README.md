@@ -32,6 +32,8 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
 3. **Find.** Type a number in the search bar (or click any number in a preview) and press Enter; *in* picks the group to look in. The query stays in the bar, and selecting a search in the history loads it back. Under the bar:
    - **Match:** *to number* (where does it appear?), *to sum (Any count)*, *to sum (Up to count)* with a count you set (2 to 20), or *to sum (Specify count)* for exactly that many. Exact matches of the number itself show first, except with a specified count, which leaves single numbers out.
+   - **Time limit** (sums only): how long a sum search may run: 10 s, 30 s (the default), 2 min, 10 min, or *No limit*, which runs until it has tried everything or you press Stop. While it runs, the results show how long it has been going, the matches so far, and a Stop button. A search that stops early says why, with *Search again for 2 min* (the next longer limit) and ways to narrow it; either one runs as a new version. For a group check the pill reads *Time per number*: each number in the group gets that long.
+   - **Before you search:** when a sum search is too big to finish in its time limit, or big enough that sums will match the number by coincidence, a note under the bar says so and offers one-click ways to narrow it: *Sums of up to 3*, *At most 1 negative*, *Negatives off*, or a smaller group. The estimate is rough on purpose, but it gets the scale right: seconds versus a lifetime, a stray coincidence versus so many that a match proves little.
    - **Search mode** (sums only): which groupings come first. *Clumped* puts numbers next to each other in one file on top; *Spread (within files)* prefers one file but numbers far apart in it; *Across files*, the default, prefers one number from each file, like a return line built from several source documents. Sums collect more matches than they show first, so the mode has real choices; a group check ranks each row's matches the same way.
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
    - **Negatives:** *off*, *on* (any number of them may count as negative), or *up to* a number you set, so a sum can use one penalty but not turn half the numbers around.
@@ -52,6 +54,7 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
    | `3,235 ±0.50` or `~0.50` | within 50 cents; typing `+-` or `-+` in the bar turns into `±` |
    | `3,235 neg` | let numbers count as negative; `neg:1` at most one of them; `neg:0` none |
    | `3,235 sums:3 mode:clumped` | search mode for sums: `mode:clumped`, `mode:spread`, `mode:across` |
+   | `3,235 sums:any time:5m` | how long a sum search may run: `time:45s`, `time:5m`, `time:1h`, `time:none` |
 
    Words like `in:`, `sums:`, `±`, and `neg` override the pills for that one search. Filters apply before the search, so a skipped number can never be part of a sum.
 
@@ -91,7 +94,7 @@ npm test
 npm run build
 ```
 
-`npm run build` writes the single self-contained file to `dist/numberfinder.html`. `npm run e2e` runs the browser tests against that built file in Microsoft Edge and saves screenshots to `test-results/shots/`. `node scripts/make-fixtures.mjs` and `node scripts/make-payroll-fixture.mjs` regenerate the fake tax documents in `fixtures/` used by the tests.
+`npm run build` writes the single self-contained file to `dist/numberfinder.html`. `npm run e2e` runs the browser tests against that built file in Microsoft Edge and saves screenshots to `test-results/shots/`. `node scripts/make-fixtures.mjs` and `node scripts/make-payroll-fixture.mjs` regenerate the fake tax documents in `fixtures/` used by the tests. `node scripts/bench-engine.mts` times the search engine against the size estimate behind the "Big search" note; the estimate's speed constant should stay just under the slowest rate it reports.
 
 | Path | What |
 | --- | --- |

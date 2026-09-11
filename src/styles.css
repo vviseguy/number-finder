@@ -378,6 +378,23 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 
 /* ---------- results ---------- */
 .results { display: flex; flex-direction: column; gap: 6px; }
+.search-note {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2);
+  background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 10px;
+}
+.search-note > svg { flex: none; }
+.search-note.running { color: var(--accent-text); background: var(--accent-soft); border-color: transparent; }
+.search-note .line { gap: 6px; }
+/* Under the bar, before a big sum search runs. */
+/* Icon in its own column beside the first line; the text and the buttons share the second column. */
+.size-note {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; row-gap: 6px; align-items: start; width: min(100%, 1040px);
+  font-size: 12.5px; color: var(--warn); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 7px 12px;
+}
+.size-note > svg { margin-top: 2px; }
+.size-note > .line { grid-column: 2; gap: 6px; }
+.size-note .hint { color: var(--warn); opacity: 0.85; }
+.narrow-chip { border-radius: 999px; }
 .sort-pick { gap: 4px; font-weight: 400; }
 .result-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
 .result-row {

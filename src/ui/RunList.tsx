@@ -96,7 +96,7 @@ function SearchStatus({ run: r }: { run: SearchRun }) {
   if (!n) {
     return (
       <span className="status danger">
-        {r.reason === 'stopped' ? 'Stopped · none found' : 'Not found'}
+        {r.reason === 'stopped' ? 'Stopped · none found' : r.reason === 'timeLimit' ? 'Out of time · none found' : 'Not found'}
         <button type="button" className="icon-btn" aria-label="Run again" title="Run again" onClick={() => rerunRun(r.id)}><IconRefresh size={13} /></button>
       </span>
     );

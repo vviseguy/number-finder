@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { IconArrowsExchange, IconChevronDown, IconHistory, IconSearch, IconUpload } from '@tabler/icons-react';
+import { IconArrowsExchange, IconChevronDown, IconClock, IconHistory, IconLoader2, IconPlayerStop, IconSearch, IconUpload } from '@tabler/icons-react';
 import { chooseFiles } from './FindBar';
 import { FolderLine, SetupButtons } from './FilesView';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, setResultSort, showPreview, shownRun, sortedMatches, targetText,
-  useAppState, viewVersion, type Run, type SearchRun,
+  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, searchSecondsOf, setResultSort, showPreview, shownRun, sortedMatches,
+  stopRun, SUM_MAX_RESULTS, targetText, useAppState, viewVersion, type Run, type SearchRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
-import { formatMoney, locationShort, madeOfPhrase, plural, roundingPhrase } from '../lib/format';
+import { elapsedLabel, formatMoney, locationShort, longerSeconds, madeOfPhrase, plural, roundingPhrase, secondsLabel } from '../lib/format';
+import { NarrowChips } from './Narrow';
 import { findNearMiss } from '../lib/nearmiss';
 import { passesTerms, termsPhrase } from '../lib/query';
 import { SORT_LABEL, SORTS, type ResultSort } from '../lib/rank';
@@ -101,7 +102,7 @@ function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean
           </span>
         )}
       </h3>
-      {r.status === 'running' && !matches.length && <p className="muted pad">Searching…</p>}
+      <SearchNote run={r} readOnly={readOnly} />
       {r.status === 'idle' && <p className="muted pad">This search is from an earlier session. Add its files and press Run.</p>}
       {r.status === 'done' && !matches.length && <NotFound run={r} readOnly={readOnly} />}
       {matches.length > 0 && (
@@ -110,6 +111,51 @@ function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * While a search runs: how long it has run, its limit, matches so far, and Stop. After it stops early (time
+ * limit, Stop, or the match cap): why, a "Search again for longer" button, and ways to narrow it.
+ * Retrying makes a new version of the same search.
+ */
+function SearchNote({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
+  const sums = r.settings.maxCount !== 1 && !r.range;
+  const limit = searchSecondsOf(r.settings);
+  if (r.status === 'running') {
+    const limitText = !sums ? '' : limit === null ? ' · no time limit' : ` of ${secondsLabel(limit)}`;
+    return (
+      <div className="search-note running" role="status">
+        <IconLoader2 className="spin" size={14} aria-hidden />
+        <span>Searching · {elapsedLabel(r.elapsedMs)}{limitText}{r.matches.length > 0 && ` · ${plural(r.matches.length, 'match', 'matches')} so far`}</span>
+        {!readOnly && (
+          <button type="button" className="btn sm push" onClick={() => stopRun(r.id)}><IconPlayerStop size={12} aria-hidden /> Stop</button>
+        )}
+      </div>
+    );
+  }
+  if (r.status !== 'done' || !sums || (r.reason !== 'timeLimit' && r.reason !== 'stopped' && r.reason !== 'maxResults')) return null;
+  const longer = r.reason === 'maxResults' ? undefined : longerSeconds(limit);
+  const why = r.reason === 'maxResults'
+    ? `Stopped after the first ${SUM_MAX_RESULTS} matches, so there may be others.`
+    : r.reason === 'stopped'
+      ? `Stopped after ${elapsedLabel(r.elapsedMs)}, before trying every combination.`
+      : `Stopped at the ${secondsLabel(limit ?? 0)} time limit, before trying every combination.`;
+  return (
+    <div className="search-note" role="status">
+      <IconClock size={14} aria-hidden />
+      <span>{why} {r.reason === 'maxResults' ? 'Narrowing the search shows the rest:' : 'Give it longer, or narrow it:'}</span>
+      {!readOnly && (
+        <span className="line">
+          {longer !== undefined && (
+            <button type="button" className="btn sm" title="Runs as a new version of this search" onClick={() => retryWith(r.id, { seconds: longer })}>
+              <IconSearch size={12} aria-hidden /> Search again {longer === null ? 'with no limit' : `for ${secondsLabel(longer)}`}
+            </button>
+          )}
+          <NarrowChips settings={r.settings} terms={r.terms} onApply={patch => retryWith(r.id, patch)} />
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -177,8 +223,11 @@ function NotFound({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
 
   return (
     <div className="not-found">
+      {r.reason === 'timeLimit' || r.reason === 'stopped' ? (
+        <p><b>Nothing found before it stopped.</b> Not every sum in {groupName(s, r.settings.groupId)} was tried yet{filters && ` (${filters})`}, so a match may still exist.</p>
+      ) : (
       <p><b>Not found.</b> {r.range ? `No number in ${groupName(s, r.settings.groupId)} falls between ${targetText(r).replace('..', ' and ')}` : `Nothing in ${groupName(s, r.settings.groupId)} makes ${formatMoney(r.target, r.targetDecimals)}${how}`}{filters && ` (${filters})`}.</p>
-      {r.reason === 'timeLimit' && <p className="muted">The search hit its time limit before checking every combination.</p>}
+      )}
       {near
         ? <NearButton near={near} target={r.target} decimals={r.targetDecimals} onShow={showPreview} />
         : !r.range && <p className="muted">Nothing in {groupName(s, r.settings.groupId)} is close to it either.</p>}
