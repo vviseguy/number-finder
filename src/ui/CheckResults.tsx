@@ -35,7 +35,7 @@ export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boole
   // Likely-intended numbers for misses, and swapped-digit singles that a coincidental sum could hide.
   const candidates = useMemo(
     () => groupAmounts(s, run.settings.groupId).filter(a => { const h = idx.get(a.id); return h ? passesTerms(a, fileTermText(h.file), run.terms) : false; }),
-    [s.files, s.groups, run.settings.groupId, run.terms, idx], // eslint-disable-line react-hooks/exhaustive-deps
+    [s.files, s.groups, run.settings.groupId, run.terms, idx],
   );
   const nearOf = useMemo(() => {
     const map = new Map<string, NearMiss<Amount> | null>();

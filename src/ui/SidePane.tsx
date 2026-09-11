@@ -1,11 +1,11 @@
 import { useMemo, type ReactNode } from 'react';
 import { IconArrowsExchange, IconEye, IconSearch } from '@tabler/icons-react';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, retryWith, showPreview, shownRun, useAppState,
+  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, runSearch, showPreview, shownRun, useAppState,
   type CheckRow, type CheckRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
-import { formatMoney, locationShort, madeOfPhrase, ROUNDING_SHORT } from '../lib/format';
+import { formatMoney, locationShort, madeOfPhrase, roundingPhrase } from '../lib/format';
 import { findNearMiss } from '../lib/nearmiss';
 import { passesTerms } from '../lib/query';
 import type { Amount, MatchItem } from '../types';
@@ -95,7 +95,7 @@ function CheckDetail({ run, row, readOnly }: { run: CheckRun; row: CheckRow; rea
 
       {row.status === 'notfound' && (
         <>
-          <p>Nothing in {groupName(s, st.groupId)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount)}, {ROUNDING_SHORT[st.rounding]}.</p>
+          <p>Nothing in {groupName(s, st.groupId)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount)}, {roundingPhrase(st.rounding, st.tolerance)}.</p>
           {near
             ? <NearButton near={near} target={amount.value} decimals={amount.decimals} onShow={showPreview} />
             : <p className="muted">Nothing in {groupName(s, st.groupId)} is close to it either.</p>}
@@ -104,7 +104,8 @@ function CheckDetail({ run, row, readOnly }: { run: CheckRun; row: CheckRow; rea
               <button
                 type="button"
                 className="btn sm"
-                onClick={() => retryWith(amount.value, amount.decimals, amount.id, run.terms, { groupId: st.groupId, maxCount: null, allowFlips: true, rounding: st.rounding })}
+                title="Starts a search of its own for this number"
+                onClick={() => runSearch(amount.value, amount.decimals, null, run.terms, amount.id, { groupId: st.groupId, maxCount: null, allowFlips: true, rounding: st.rounding })}
               >
                 <IconSearch size={12} aria-hidden /> Search {formatMoney(amount.value, amount.decimals)} with any sum and negatives
               </button>

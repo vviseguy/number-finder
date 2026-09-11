@@ -14,28 +14,40 @@ Double-click **`numberfinder.html`**. It opens in your browser and works offline
 
 Everything happens inside that browser tab. The page includes a security rule (a Content-Security-Policy) that stops it from making any network connection at all, so documents can't be sent anywhere — you can check the rule at the top of the HTML file.
 
-Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, your searches, and the theme — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
+Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, your searches, the pane width, and the theme — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
 
 ## Using it
 
-The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three views. The drop target sits beside them, and the search bar under the header is on every view. The sun/moon button at the top right pins light or dark mode (it follows your system until you do).
+The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three views. The drop target sits at the right of the header, and the search bar under the header is on every view. The sun/moon button at the top right pins light or dark mode (it follows your system until you do). The handle between the results and the pane on the right drags to resize it.
 
 1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. Long file names are shortened to what tells them apart: words that appear in every file's name are replaced by `…`, so *Alpha Client 2025 Bank Statement Jan.pdf* shows as `Alpha…Jan.pdf` next to its Beta and February siblings, with the full name underneath and in tooltips. The pencil sets your own short name instead, remembered for next time. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
-3. **Find.** The search bar reads as a sentence: *Find* `a number` · `3,235` · *in* `All files`. Type a number (or click any number in a preview) and press Enter. Several numbers, like `3,235 85,000`, start several searches. The query stays in the bar; selecting a search in the list loads it back, and repeating a search just shows the existing one. Under the bar:
-   - **Match:** *1 number* (where does it appear?), *sums of up to N* (2 to 20), or *any sum*. Exact matches of the number itself always show first.
+3. **Find.** Type a number in the search bar (or click any number in a preview) and press Enter; *in* picks the group to look in. The query stays in the bar, and selecting a search in the history loads it back. Under the bar:
+   - **Match:** *1 number* (where does it appear?), *Sums of up to* a number you set (2 to 20), or *Any sum*. Exact matches of the number itself always show first.
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
    - **Negatives:** *also try negatives* lets any number count as negative.
 
-   **Filters.** Add words the way you would in a search engine: `3,235 -hours` skips every number whose label, column, sheet, or file name mentions "hours"; `3,235 interest` searches only numbers that mention "interest"; quotes keep a phrase together (`-"hourly rate"`). Filters apply before the search, so a skipped number can never be part of a sum.
+   **The bar's grammar** (the empty bar shows these in turn):
+   | Type | Means |
+   | --- | --- |
+   | `3,235 85,000` | two numbers, two searches |
+   | `3,200..3,300` | every number in a range |
+   | `3,235 -hours` | skip numbers whose label, column, sheet, or file name mentions "hours" |
+   | `3,235 interest` | only numbers that mention "interest"; `-"hourly rate"` keeps a phrase together |
+   | `3,235 in:Source` | look in the group whose name starts with "Source" (quotes for spaces) |
+   | `3,235 sums:3` | sums of up to 3 numbers; `sums:any`, `sums:1` |
+   | `3,235 ±0.50` or `~0.50` | within 50 cents |
+   | `3,235 neg` | let numbers count as negative |
 
-   **Check a whole group.** Change *Find* `a number` to *Find* `every number in 2025 return`; the right side of the bar then reads *against* `Source docs`. Every number in the first group is looked up in the second, with the same Match, Rounding, and filter settings. The result is a table of what was found, what's made of several numbers, and what's missing.
+   Words like `in:`, `sums:`, `±`, and `neg` override the pills for that one search. Filters apply before the search, so a skipped number can never be part of a sum.
 
-   Searches and checks run side by side in one list; each shows its progress and can be stopped. The pane on the right shows the selected number in its file. Hover any number, in the results or in a file, to light up every other place the same value appears; the yellow marks along the scrollbars show where those places are.
+   **Whole group.** Switch the bar from *One number* to *Whole group*, pick *Every number in* `2025 return`, and the right side reads *against* `Source docs`. Every number in the first group is looked up in the second, with the same Match, Rounding, and filter settings. The result is a table of what was found, what's made of several numbers, and what's missing.
+
+   **History and versions.** Searches and checks run side by side in the history; each shows its progress and can be stopped. Versions are automatic: searching the *same number* again with different settings or filters makes a new version of that search (so does a "try…" button under a miss); a *different* number is a new search; the identical search just shows the existing one. The bar above the results says which version you're on and when it ran; its picker shows every past version read-only, with *Back to current* and *Restore*.
+
+   The pane on the right shows the selected number in its file. Hover any number, in the results or in a file, to light up every other place the same value appears; the yellow marks along the scrollbars show where those places are.
 
    **Sums** show on one line as an equation, `W-2 85,000.00 + INT 3,234.56 + DIV 2,000.00 = 90,234.56`, and open into the full breakdown. A number counted as negative is written `−(265.44)`, with the grey minus and parentheses around the number as it appears in the file.
-
-   **Editing and versions.** The pencil on a search loads it back into the box; *Find again* replaces it and keeps the old version. The `v2 ▾` picker on the row shows every past version, read-only, with *Back to current* and *Restore this version*.
 
 **What counts as a number:** amounts like `85,000.00`, `$3,234.56`, `(265.44)`, `3,235`. Years, box and line labels (`1`, `2a`, `25a`), form names (`Form 1040`), SSNs, EINs, ZIP codes, dates, percentages, and long account numbers are skipped. Open a file's preview to see exactly which numbers were picked up — each one is clickable.
 

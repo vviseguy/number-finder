@@ -3,13 +3,13 @@
 // Contracts:
 //   - File bytes live outside the state (fileData) so the state stays small and serializable.
 //   - Groups and nicknames reference files by key ("name|size"), so a re-dropped file slots back in.
-//   - Only SETUP is saved between sessions (groups, nicknames, find settings, run definitions) — never
-//     file contents, amounts, or results.
-//   - One find box serves both jobs: a number ("what makes 3,235") or, with a group picked, every number
-//     in that group. Both become a Run in one list. Filter words (-hours) narrow what's searched and what's
-//     checked, before the search runs.
-//   - Editing a run replaces it in place and keeps the old version in its history; any version can be
-//     viewed read-only or restored (which runs it again as a new version).
+//   - Only SETUP is saved between sessions (groups, nicknames, bar settings, run definitions, pane width,
+//     theme) — never file contents, amounts, or results.
+//   - The search bar starts runs. Each number typed is its own search; in whole-group mode the bar's words
+//     are filters for a check. Words like in:, sums:, ±, neg override the option pills for that run.
+//   - Versions are automatic: a query with the SAME NUMBER as an existing search (or the same group for a
+//     check) becomes a new version of it; a different number is a new search; the identical definition
+//     just shows the existing one. Any version can be viewed read-only or restored (as a newer version).
 
 import { useSyncExternalStore } from 'react';
 import type { Amount, DoneReason, EngineEvent, FileLimit, Match, ParsedFile, Rounding, SearchRequest } from '../types';
@@ -17,16 +17,18 @@ import { ROUNDING_TOLERANCE } from '../types';
 import { extractFile } from '../extract';
 import { SearchPool } from '../engine/pool';
 import { forgetPdf, getPdfjs } from '../lib/pdf';
-import { formatMoney, madeOfLabel, parseLimit, ROUNDING_SHORT, uid } from '../lib/format';
+import { formatMoney, madeOfLabel, parseLimit, roundingPhrase, uid } from '../lib/format';
 import { hasTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, type Terms } from '../lib/query';
 import { shortNames } from '../lib/names';
 
 // These are read while this module loads (loadSetup below), so they must be declared before that line.
 export const ALL_FILES = '__all__';
-const STORAGE_KEY = 'number-finder:setup:v3';
+const STORAGE_KEY = 'number-finder:setup:v4';
 const THEME_KEY = 'number-finder:theme';
+const PANE_KEY = 'number-finder:pane';
 const GROUP_COLORS = 6;
 const READ_TIMEOUT_MS = 60_000;
+export const MIN_PANE = 320;
 
 // ---------- state shape ----------
 
@@ -38,7 +40,7 @@ export interface FileEntry {
   /** Identity that survives sessions: "name|size". */
   key: string;
   name: string;
-  /** Short name shown in the interface; '' means use the file name. */
+  /** Short name shown in the interface; '' means use the file name (shortened automatically). */
   nick: string;
   size: number;
   status: 'reading' | 'ready' | 'error';
@@ -49,12 +51,12 @@ export interface FileEntry {
 export interface GroupMember { key: string; name: string; limit: string }
 export interface Group { id: string; name: string; color: number; members: GroupMember[] }
 
-/** groupId is the group searched IN. */
-export interface FindSettings { groupId: string; maxCount: number | null; rounding: Rounding; allowFlips: boolean }
+/** groupId is the group searched IN. tolerance, when set, replaces the rounding preset for that run. */
+export interface FindSettings { groupId: string; maxCount: number | null; rounding: Rounding; allowFlips: boolean; tolerance?: number }
 
 type RunStatus = 'idle' | 'running' | 'done' | 'stopped';
 
-/** A frozen copy of a run as it was before an edit. */
+/** A frozen copy of a run as it was before a newer version replaced it. */
 export interface Version { at: number; run: Run }
 
 interface RunBase {
@@ -63,8 +65,10 @@ interface RunBase {
   terms: Terms;
   status: RunStatus;
   startedAt: number;
+  /** Wall-clock time this version was started. */
+  at: number;
   elapsedMs: number;
-  /** 1 for a fresh run; +1 per edit or restore. */
+  /** 1 for a fresh run; +1 per new version. */
   version: number;
   history: Version[];
   /** Index into history being viewed read-only, or null for the current version. */
@@ -75,6 +79,8 @@ export interface SearchRun extends RunBase {
   kind: 'search';
   target: number;
   targetDecimals: number;
+  /** Set for a range search (3,200..3,300): target is the middle, the tolerance the half-width. */
+  range: { lo: number; hi: number } | null;
   originId: string | null;
   reason: DoneReason | null;
   detail?: string;
@@ -102,17 +108,17 @@ export interface Notice { kind: 'info' | 'warn' | 'error'; text: string; action?
 export interface AppState {
   view: View;
   theme: Theme;
+  /** Width of the right-hand pane in px. */
+  paneWidth: number;
   files: FileEntry[];
   /** Nicknames by file key, kept for files that aren't loaded right now. */
   nicks: Record<string, string>;
   groups: Group[];
   find: FindSettings;
-  /** What's typed in the find box: a number and/or filter words. */
+  /** What's typed in the search bar. */
   findText: string;
-  /** With a group picked, the box checks every number in it instead of one number. */
+  /** Whole-group mode: the group whose every number is looked up; null = one number. */
   scopeGroupId: string | null;
-  /** The run being edited in the box; submitting replaces it. */
-  editingRunId: string | null;
   runs: Run[];
   selectedRunId: string | null;
   /** Amount shown in the side pane. */
@@ -162,7 +168,7 @@ export function useAppState(): AppState {
 // ---------- persistence (setup only) ----------
 
 type SavedRun =
-  | { kind: 'search'; target: number; targetDecimals: number; settings: FindSettings; terms: Terms }
+  | { kind: 'search'; target: number; targetDecimals: number; range: { lo: number; hi: number } | null; settings: FindSettings; terms: Terms }
   | { kind: 'check'; checkGroupId: string; settings: FindSettings; terms: Terms };
 
 interface SavedSetup { groups: Group[]; nicks: Record<string, string>; find: FindSettings; scopeGroupId: string | null; runs: SavedRun[] }
@@ -173,10 +179,10 @@ function defaultFind(): FindSettings {
 }
 
 function restoreRun(r: SavedRun): Run {
-  const base = { settings: r.settings, terms: r.terms ?? { include: [], exclude: [] }, status: 'idle' as const, startedAt: 0, elapsedMs: 0, version: 1, history: [], viewing: null };
+  const base = { settings: r.settings, terms: r.terms ?? { include: [], exclude: [] }, status: 'idle' as const, startedAt: 0, at: 0, elapsedMs: 0, version: 1, history: [], viewing: null };
   return r.kind === 'check'
     ? { ...base, kind: 'check', id: uid('c'), checkGroupId: r.checkGroupId, rows: [], skippedZeros: 0, skippedByTerms: 0, selectedAmountId: null }
-    : { ...base, kind: 'search', id: uid('s'), target: r.target, targetDecimals: r.targetDecimals, originId: null, reason: null, matches: [], progress: null };
+    : { ...base, kind: 'search', id: uid('s'), target: r.target, targetDecimals: r.targetDecimals, range: r.range ?? null, originId: null, reason: null, matches: [], progress: null };
 }
 
 function loadTheme(): Theme {
@@ -195,11 +201,15 @@ function applyTheme(theme: Theme) {
   else document.documentElement.dataset.theme = theme;
 }
 
+function loadPaneWidth(): number {
+  try { const n = Number(localStorage.getItem(PANE_KEY)); return n >= MIN_PANE ? n : 520; } catch { return 520; }
+}
+
 function loadSetup(): AppState {
   const theme = loadTheme();
   applyTheme(theme);
   const base: AppState = {
-    view: 'files', theme, files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', scopeGroupId: null, editingRunId: null,
+    view: 'files', theme, paneWidth: loadPaneWidth(), files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', scopeGroupId: null,
     runs: [], selectedRunId: null, previewId: null, notice: null, dragging: false,
   };
   try {
@@ -222,7 +232,7 @@ function loadSetup(): AppState {
 function saveSetup() {
   const runs: SavedRun[] = state.runs.slice(0, 30).map(r => (r.kind === 'check'
     ? { kind: 'check', checkGroupId: r.checkGroupId, settings: r.settings, terms: r.terms }
-    : { kind: 'search', target: r.target, targetDecimals: r.targetDecimals, settings: r.settings, terms: r.terms }));
+    : { kind: 'search', target: r.target, targetDecimals: r.targetDecimals, range: r.range, settings: r.settings, terms: r.terms }));
   const saved: SavedSetup = { groups: state.groups, nicks: state.nicks, find: state.find, scopeGroupId: state.scopeGroupId, runs };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch { /* storage full or blocked: setup just isn't remembered */ }
 }
@@ -263,12 +273,23 @@ function refreshLabels() {
 }
 export const fileLabel = (f: { nick: string; name: string }) => f.nick || labels.get(f.name) || f.name;
 
+/** Text the filters are matched against for a file: its name and nickname. */
+export const fileTermText = (f: FileEntry) => `${f.name} ${f.nick}`;
+
 export function groupById(s: AppState, id: string | null): Group | undefined {
   return id ? s.groups.find(g => g.id === id) : undefined;
 }
 
 export function groupName(s: AppState, id: string): string {
   return id === ALL_FILES ? 'All files' : groupById(s, id)?.name ?? 'a deleted group';
+}
+
+/** The group whose name starts with (or equals) the text, case-insensitive; "all" means all files. */
+export function groupByText(s: AppState, text: string): string | undefined {
+  const t = text.trim().toLowerCase();
+  if (!t) return undefined;
+  if (t === 'all' || t === 'all files') return ALL_FILES;
+  return (s.groups.find(g => g.name.toLowerCase() === t) ?? s.groups.find(g => g.name.toLowerCase().startsWith(t)))?.id;
 }
 
 /** Ready files in a group (or every ready file for "All files"), with each file's limit. */
@@ -294,11 +315,16 @@ export function groupsOfFile(s: AppState, key: string): Group[] {
 
 /** "in Source docs · sums of up to 3 · whole dollars · negatives · skipping “hours”" */
 export function runSummary(s: AppState, r: { settings: FindSettings; terms: Terms }): string {
-  const parts = [`in ${groupName(s, r.settings.groupId)}`, madeOfLabel(r.settings.maxCount), ROUNDING_SHORT[r.settings.rounding]];
+  const parts = [`in ${groupName(s, r.settings.groupId)}`, madeOfLabel(r.settings.maxCount), roundingPhrase(r.settings.rounding, r.settings.tolerance)];
   if (r.settings.allowFlips) parts.push('negatives');
   const t = termsPhrase(r.terms);
   if (t) parts.push(t);
   return parts.join(' · ');
+}
+
+/** "3,235" or "3,200..3,300". */
+export function targetText(r: SearchRun): string {
+  return r.range ? `${formatMoney(r.range.lo, r.targetDecimals)}..${formatMoney(r.range.hi, r.targetDecimals)}` : formatMoney(r.target, r.targetDecimals);
 }
 
 /** The run as shown: a past version when one is being viewed, else the run itself. */
@@ -307,7 +333,7 @@ export function shownRun(r: Run): { run: Run; past: boolean } {
   return v ? { run: v.run, past: true } : { run: r, past: false };
 }
 
-// ---------- notices and views ----------
+// ---------- notices, views, layout ----------
 
 export function notify(kind: Notice['kind'], text: string, action?: Notice['action']) {
   clearTimeout(noticeTimer);
@@ -322,6 +348,13 @@ export function setTheme(theme: Theme) {
   applyTheme(theme);
   try { if (theme === 'system') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, theme); } catch { /* not remembered */ }
   set({ theme });
+}
+
+export function setPaneWidth(px: number) {
+  const width = Math.round(Math.max(MIN_PANE, px));
+  if (width === state.paneWidth) return;
+  try { localStorage.setItem(PANE_KEY, String(width)); } catch { /* not remembered */ }
+  set({ paneWidth: width });
 }
 
 // ---------- files ----------
@@ -442,20 +475,23 @@ export function setLimit(groupId: string, key: string, limit: string) {
   }));
 }
 
-// ---------- the find box ----------
+// ---------- the search bar ----------
 
 export function setFind(patch: Partial<FindSettings>) { set(s => ({ find: { ...s.find, ...patch } })); }
 export function setFindText(findText: string) { set({ findText }); }
 export function setScope(scopeGroupId: string | null) { set({ scopeGroupId }); }
+export function clearFindText() { set({ findText: '' }); }
 
 function currentSettings(): FindSettings {
   const g = state.find.groupId;
-  return { ...state.find, groupId: g === ALL_FILES || groupById(state, g) ? g : ALL_FILES };
+  const { tolerance: _drop, ...rest } = state.find;
+  void _drop;
+  return { ...rest, groupId: g === ALL_FILES || groupById(state, g) ? g : ALL_FILES };
 }
 
 /** What the search bar shows for a run: its number(s) and filter words. */
 function queryTextOf(r: Run): string {
-  const number = r.kind === 'search' ? formatMoney(r.target, r.targetDecimals).replace('−', '-') : '';
+  const number = r.kind === 'search' ? targetText(r).replace(/−/g, '-') : '';
   return [number, serializeTerms(r.terms)].filter(Boolean).join(' ');
 }
 
@@ -464,79 +500,92 @@ function loadIntoBar(r: Run) {
   set({ find: r.settings, findText: queryTextOf(r), scopeGroupId: r.kind === 'check' ? r.checkGroupId : null });
 }
 
-/** Load a run back into the bar for editing; the next Find or Check replaces it and keeps the old version. */
-export function editRun(id: string) {
-  const r = state.runs.find(x => x.id === id);
-  if (!r) return;
-  loadIntoBar(r);
-  set({ editingRunId: id, view: 'find', selectedRunId: id });
-}
-
-export function cancelEdit() { set({ editingRunId: null }); }
-
-export function clearFindText() { set({ findText: '', editingRunId: null }); }
-
 const sameTerms = (a: Terms, b: Terms) =>
   a.include.length === b.include.length && a.exclude.length === b.exclude.length
   && a.include.every(w => b.include.includes(w)) && a.exclude.every(w => b.exclude.includes(w));
 const sameSettings = (a: FindSettings, b: FindSettings) =>
-  a.groupId === b.groupId && a.maxCount === b.maxCount && a.rounding === b.rounding && a.allowFlips === b.allowFlips;
+  a.groupId === b.groupId && a.maxCount === b.maxCount && a.rounding === b.rounding && a.allowFlips === b.allowFlips && (a.tolerance ?? -1) === (b.tolerance ?? -1);
+const close = (a: number, b: number) => Math.abs(a - b) < 0.005;
 
-/** A run already in the list with exactly this definition, if any. */
-function existingRun(def: { kind: 'search'; target: number } | { kind: 'check'; checkGroupId: string }, terms: Terms, settings: FindSettings): Run | undefined {
-  return state.runs.find(r => r.kind === def.kind && sameTerms(r.terms, terms) && sameSettings(r.settings, settings)
-    && (r.kind === 'search' ? Math.abs(r.target - (def as { target: number }).target) < 0.005 : r.checkGroupId === (def as { checkGroupId: string }).checkGroupId));
+/** The search for this number (or range), whichever version it's on. */
+function searchFor(target: number, range: { lo: number; hi: number } | null): SearchRun | undefined {
+  return state.runs.find((r): r is SearchRun => r.kind === 'search'
+    && (range ? !!r.range && close(r.range.lo, range.lo) && close(r.range.hi, range.hi) : !r.range && close(r.target, target)));
 }
 
+const checkFor = (checkGroupId: string) => state.runs.find((r): r is CheckRun => r.kind === 'check' && r.checkGroupId === checkGroupId);
+
 /**
- * Enter in the search bar. Each number typed starts its own search (they share the filters and settings);
- * with "every number in <group>" picked, the bar's words are filters for a check. A query that repeats a
- * search already in the list just shows that one again. In edit mode the (first) result replaces the run
- * being edited. The query stays in the bar afterwards.
+ * Enter in the search bar. Each number is its own search (they share filters and settings); a range
+ * (3,200..3,300) is a search too. In whole-group mode the bar's words are filters for a check.
+ * Same number as an existing search → a new version of it (or just show it, if nothing changed).
+ * The query stays in the bar afterwards.
  */
 export function submitFind(): boolean {
   const q = parseQuery(state.findText);
+  if (q.errors.length) { notify('error', q.errors[0]); return false; }
   const settings = currentSettings();
-  const editing = state.runs.find(r => r.id === state.editingRunId) ?? null;
+  if (q.inGroup !== null) {
+    const id = groupByText(state, q.inGroup);
+    if (!id) { notify('error', `No group is called "${q.inGroup}". Groups: ${state.groups.map(g => g.name).join(', ') || 'none yet'}.`); return false; }
+    settings.groupId = id;
+  }
+  if (q.maxCount !== undefined) settings.maxCount = q.maxCount;
+  if (q.negatives !== undefined) settings.allowFlips = q.negatives;
+  if (q.tolerance !== undefined) settings.tolerance = q.tolerance;
 
   if (state.scopeGroupId) {
-    if (q.value !== null) {
-      notify('warn', `"Every number in ${groupName(state, state.scopeGroupId)}" is picked, so the bar only takes filter words. Choose "a number" to search for ${q.valueText}.`);
+    if (q.numbers.length || q.range) {
+      notify('warn', `Whole-group mode looks up every number in ${groupName(state, state.scopeGroupId)}; the bar only takes filter words. Switch to One number to search for ${q.numbers[0]?.text ?? q.range?.text}.`);
       return false;
     }
-    const dup = editing ? undefined : existingRun({ kind: 'check', checkGroupId: state.scopeGroupId }, q.terms, settings);
-    if (dup && dup.status !== 'idle') { selectRun(dup.id); notify('info', 'That check is already in the list; showing it.'); return true; }
-    if (dup) { rerunRun(dup.id); return true; }
-    const ok = editing?.kind === 'check'
-      ? replaceCheck(editing, state.scopeGroupId, settings, q.terms)
-      : startCheck(state.scopeGroupId, settings, q.terms);
-    if (ok) set({ editingRunId: null });
-    return ok;
+    const existing = checkFor(state.scopeGroupId);
+    if (existing && existing.status !== 'idle' && sameTerms(existing.terms, q.terms) && sameSettings(existing.settings, settings)) {
+      selectRun(existing.id);
+      notify('info', 'That check is already in the history; showing it.');
+      return true;
+    }
+    return existing ? replaceCheck(existing, state.scopeGroupId, settings, q.terms) : startCheck(state.scopeGroupId, settings, q.terms);
   }
 
-  const targets = q.value === null ? [] : [{ value: q.value, text: q.valueText }, ...q.extraNumbers.map(t => ({ value: parseQuery(t).value!, text: t }))];
+  const targets: { value: number; decimals: number; range: { lo: number; hi: number } | null; text: string }[] = q.numbers.map(n => ({ value: n.value, decimals: n.decimals, range: null, text: n.text }));
+  if (q.range) {
+    const decimals = Math.max(decimalsOf(q.range.text.split('..')[0]), decimalsOf(q.range.text.split('..')[1]));
+    targets.push({ value: (q.range.lo + q.range.hi) / 2, decimals, range: q.range, text: q.range.text });
+  }
   if (!targets.length) {
-    notify('error', 'Type a number to find, like 3,235. To look up every number in a group, pick the group under Find.');
+    notify('error', 'Type a number to find, like 3,235, or a range like 3,200..3,300.');
     return false;
   }
+
   let firstId: string | null = null;
-  let started = 0;
-  targets.forEach((t, i) => {
-    const decimals = decimalsOfText(t.text);
-    const dup = editing ? undefined : existingRun({ kind: 'search', target: t.value }, q.terms, settings);
-    if (dup && dup.status !== 'idle') { firstId ??= dup.id; if (targets.length === 1) notify('info', 'That search is already in the list; showing it.'); return; }
-    if (dup) { rerunRun(dup.id); firstId ??= dup.id; started++; return; }
-    const ok = i === 0 && editing?.kind === 'search'
-      ? replaceSearch(editing, t.value, decimals, q.terms, settings)
-      : runSearch(t.value, decimals, q.terms, null, settings);
-    if (ok) { started++; firstId ??= i === 0 && editing?.kind === 'search' ? editing.id : state.runs[0].id; }
-  });
-  if (firstId) set({ selectedRunId: firstId, editingRunId: null });
-  if (targets.length > 1 && started) notify('info', `Started ${started} searches, one per number.`);
+  let versions = 0;
+  let fresh = 0;
+  for (const t of targets) {
+    const existing = searchFor(t.value, t.range);
+    if (existing) {
+      if (existing.status !== 'idle' && sameTerms(existing.terms, q.terms) && sameSettings(existing.settings, settings)) {
+        firstId ??= existing.id;
+        if (targets.length === 1) { selectRun(existing.id); notify('info', 'That search is already in the history; showing it.'); }
+        continue;
+      }
+      if (replaceSearch(existing, t.value, t.decimals, t.range, q.terms, settings)) { versions++; firstId ??= existing.id; }
+    } else if (runSearch(t.value, t.decimals, t.range, q.terms, null, settings)) {
+      fresh++;
+      firstId ??= state.runs[0].id;
+    }
+  }
+  if (firstId) set({ selectedRunId: firstId });
+  if (targets.length > 1 && (fresh || versions)) {
+    notify('info', [fresh && `${fresh} new ${fresh === 1 ? 'search' : 'searches'}`, versions && `${versions} new ${versions === 1 ? 'version' : 'versions'}`].filter(Boolean).join(' · ') + '.');
+  } else if (versions === 1 && fresh === 0) {
+    const r = state.runs.find(x => x.id === firstId);
+    if (r) notify('info', `Version ${r.version} of the search for ${targets[0].text}.`);
+  }
   return !!firstId;
 }
 
-const decimalsOfText = (t: string) => { const m = /\.(\d+)/.exec(t); return m ? m[1].length : 0; };
+const decimalsOf = (t: string) => { const m = /\.(\d+)/.exec(t); return m ? m[1].length : 0; };
 
 function buildRequest(
   s: AppState,
@@ -545,6 +594,7 @@ function buildRequest(
   exclude: string | null,
   terms: Terms,
   budget: { maxResults: number; timeLimitMs: number },
+  range: { lo: number; hi: number } | null = null,
 ): SearchRequest | string {
   const members = groupFiles(s, settings.groupId);
   if (!members.length) {
@@ -560,7 +610,7 @@ function buildRequest(
     if (m.limit.min > 0 || m.limit.max !== null) limits[m.file.id] = m.limit;
   }
   const candidates = members.flatMap(m => (m.file.parsed?.amounts ?? [])
-    .filter(a => a.id !== exclude && passesTerms(a, `${m.file.name} ${m.file.nick}`, terms))
+    .filter(a => a.id !== exclude && passesTerms(a, fileTermText(m.file), terms))
     .map(a => ({ id: a.id, fileId: a.fileId, value: a.value })));
   if (!candidates.length) {
     return hasTerms(terms)
@@ -569,47 +619,47 @@ function buildRequest(
   }
   return {
     target,
-    maxCount: settings.maxCount,
+    maxCount: range ? 1 : settings.maxCount,
     allowFlips: settings.allowFlips,
-    tolerance: ROUNDING_TOLERANCE[settings.rounding],
+    tolerance: range ? (range.hi - range.lo) / 2 : settings.tolerance ?? ROUNDING_TOLERANCE[settings.rounding],
     candidates,
     limits,
     ...budget,
   };
 }
 
-/** Text the filters are matched against for a file: its name and nickname. */
-export const fileTermText = (f: FileEntry) => `${f.name} ${f.nick}`;
-
 // ---------- single searches ----------
 
 const SEARCH_BUDGET = { maxResults: 50, timeLimitMs: 10_000 };
 
-const snapshot = (r: Run): Version => ({ at: Date.now(), run: { ...r, history: [], viewing: null } });
+const snapshot = (r: Run): Version => ({ at: r.at, run: { ...r, history: [], viewing: null } });
 
-export function runSearch(target: number, decimals: number, terms: Terms, originId: string | null, settings: FindSettings = currentSettings()): boolean {
-  const request = buildRequest(state, settings, target, originId, terms, SEARCH_BUDGET);
+export function runSearch(
+  target: number, decimals: number, range: { lo: number; hi: number } | null, terms: Terms, originId: string | null,
+  settings: FindSettings = currentSettings(),
+): boolean {
+  const request = buildRequest(state, settings, target, originId, terms, SEARCH_BUDGET, range);
   if (typeof request === 'string') { notify('warn', request); return false; }
   const run: SearchRun = {
-    kind: 'search', id: uid('s'), target, targetDecimals: decimals, originId, settings, terms, status: 'running', reason: null,
-    matches: [], progress: 0, startedAt: performance.now(), elapsedMs: 0, version: 1, history: [], viewing: null,
+    kind: 'search', id: uid('s'), target, targetDecimals: decimals, range, originId, settings, terms, status: 'running', reason: null,
+    matches: [], progress: 0, startedAt: performance.now(), at: Date.now(), elapsedMs: 0, version: 1, history: [], viewing: null,
   };
   set(s => ({ runs: [run, ...s.runs], selectedRunId: run.id, previewId: null, view: 'find', findText: queryTextOf(run), find: settings, scopeGroupId: null }));
   startSearch(run.id, request);
   return true;
 }
 
-/** Edit: the same run, new target/filters/settings; the old version goes into its history. */
-function replaceSearch(old: SearchRun, target: number, decimals: number, terms: Terms, settings: FindSettings): boolean {
-  const request = buildRequest(state, settings, target, null, terms, SEARCH_BUDGET);
+/** A new version of an existing search: the old one goes into its history. */
+function replaceSearch(old: SearchRun, target: number, decimals: number, range: { lo: number; hi: number } | null, terms: Terms, settings: FindSettings): boolean {
+  const request = buildRequest(state, settings, target, old.originId, terms, SEARCH_BUDGET, range);
   if (typeof request === 'string') { notify('warn', request); return false; }
   handles.get(old.id)?.stop();
   handles.delete(old.id);
   patchRun(old.id, r => ({
-    target, targetDecimals: decimals, originId: null, terms, settings, status: 'running', reason: null, matches: [], progress: 0,
-    startedAt: performance.now(), elapsedMs: 0, version: r.version + 1, history: [...r.history, snapshot(r)], viewing: null,
+    target, targetDecimals: decimals, range, terms, settings, status: 'running', reason: null, matches: [], progress: 0,
+    startedAt: performance.now(), at: Date.now(), elapsedMs: 0, version: r.version + 1, history: [...r.history, snapshot(r)], viewing: null,
   }));
-  set({ selectedRunId: old.id, previewId: null, view: 'find' });
+  set({ selectedRunId: old.id, previewId: null, view: 'find', find: settings, findText: queryTextOf({ ...old, target, targetDecimals: decimals, range, terms }), scopeGroupId: null });
   startSearch(old.id, request);
   return true;
 }
@@ -637,17 +687,22 @@ function onSearchEvent(id: string, ev: EngineEvent) {
   }
 }
 
-/** Clicking a number in a preview: search for it with the current settings and filters. */
+/** Clicking a number in a preview: search for it with the bar's current filters and settings. */
 export function searchForAmount(amountId: string) {
   const hit = amountIndex().get(amountId);
   if (!hit) return;
-  runSearch(hit.amount.value, hit.amount.decimals, parseQuery(state.findText).terms, amountId);
+  const existing = searchFor(hit.amount.value, null);
+  if (existing) { selectRun(existing.id); return; }
+  runSearch(hit.amount.value, hit.amount.decimals, null, parseQuery(state.findText).terms, amountId);
 }
 
-/** From a miss: widen the settings and search the same number again. */
-export function retryWith(target: number, decimals: number, originId: string | null, terms: Terms, patch: Partial<FindSettings>) {
-  setFind(patch);
-  runSearch(target, decimals, terms, originId);
+/** A new version of a search with wider settings (from the "try …" buttons under a miss). */
+export function retryWith(runId: string, patch: Partial<FindSettings>) {
+  const r = state.runs.find(x => x.id === runId);
+  if (!r || r.kind !== 'search') return;
+  const settings = { ...r.settings, ...patch };
+  if ('rounding' in patch) delete settings.tolerance;
+  replaceSearch(r, r.target, r.targetDecimals, r.range, r.terms, settings);
 }
 
 // ---------- checking every number in a group ----------
@@ -659,7 +714,7 @@ export function startCheck(checkGroupId: string, settings: FindSettings, terms: 
   }
   const run: CheckRun = {
     kind: 'check', id: uid('c'), checkGroupId, settings, terms, status: 'running', rows: [], skippedZeros: 0, skippedByTerms: 0,
-    selectedAmountId: null, startedAt: performance.now(), elapsedMs: 0, version: 1, history: [], viewing: null,
+    selectedAmountId: null, startedAt: performance.now(), at: Date.now(), elapsedMs: 0, version: 1, history: [], viewing: null,
   };
   return launchCheck(run, true);
 }
@@ -696,6 +751,7 @@ function launchCheck(base: CheckRun, isNew: boolean): boolean {
     skippedByTerms: all.length - kept.length,
     selectedAmountId: null, // until a row is picked, the table's first row is shown
     startedAt: performance.now(),
+    at: Date.now(),
     elapsedMs: 0,
   };
   set(s => ({
@@ -703,6 +759,9 @@ function launchCheck(base: CheckRun, isNew: boolean): boolean {
     selectedRunId: run.id,
     previewId: null,
     view: 'find',
+    find: run.settings,
+    findText: serializeTerms(run.terms),
+    scopeGroupId: run.checkGroupId,
   }));
 
   const budget = { maxResults: 3, timeLimitMs: base.settings.maxCount === null ? 3000 : 1500 };
@@ -739,7 +798,7 @@ export function selectCheckRow(runId: string, amountId: string) {
   }));
 }
 
-// ---------- the list of runs ----------
+// ---------- history ----------
 
 export function stopRun(id: string) {
   const r = state.runs.find(x => x.id === id);
@@ -754,11 +813,7 @@ export function removeRun(id: string) {
   handles.delete(id);
   set(s => {
     const runs = s.runs.filter(r => r.id !== id);
-    return {
-      runs,
-      selectedRunId: s.selectedRunId === id ? runs[0]?.id ?? null : s.selectedRunId,
-      editingRunId: s.editingRunId === id ? null : s.editingRunId,
-    };
+    return { runs, selectedRunId: s.selectedRunId === id ? runs[0]?.id ?? null : s.selectedRunId };
   });
 }
 
@@ -775,9 +830,9 @@ export function rerunRun(id: string) {
   if (!r) return;
   stopRun(id);
   if (r.kind === 'check') { launchCheck({ ...r, viewing: null }, false); return; }
-  const request = buildRequest(state, r.settings, r.target, r.originId, r.terms, SEARCH_BUDGET);
+  const request = buildRequest(state, r.settings, r.target, r.originId, r.terms, SEARCH_BUDGET, r.range);
   if (typeof request === 'string') { notify('warn', request); return; }
-  patchRun(id, () => ({ status: 'running', reason: null, matches: [], progress: 0, startedAt: performance.now(), viewing: null }));
+  patchRun(id, () => ({ status: 'running', reason: null, matches: [], progress: 0, startedAt: performance.now(), at: Date.now(), viewing: null }));
   set({ selectedRunId: id, previewId: null, view: 'find' });
   startSearch(id, request);
 }
@@ -793,7 +848,7 @@ export function restoreVersion(id: string, index: number) {
   const r = state.runs.find(x => x.id === id);
   const v = r?.history[index]?.run;
   if (!r || !v) return;
-  if (r.kind === 'search' && v.kind === 'search') replaceSearch(r, v.target, v.targetDecimals, v.terms, v.settings);
+  if (r.kind === 'search' && v.kind === 'search') replaceSearch(r, v.target, v.targetDecimals, v.range, v.terms, v.settings);
   else if (r.kind === 'check' && v.kind === 'check') replaceCheck(r, v.checkGroupId, v.settings, v.terms);
 }
 
@@ -804,7 +859,7 @@ export function selectRun(id: string) {
   const shown = shownRun(r).run;
   const previewId = shown.kind === 'search' ? shown.matches[0]?.items[0].id ?? null : shown.selectedAmountId ?? shown.rows[0]?.amountId ?? null;
   loadIntoBar(r);
-  set({ selectedRunId: id, previewId, editingRunId: null });
+  set({ selectedRunId: id, previewId });
 }
 
 export function showPreview(amountId: string | null) { set({ previewId: amountId }); }

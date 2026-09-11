@@ -1,12 +1,13 @@
-import { IconCheck, IconHistory, IconListCheck, IconPencil, IconPlayerPlay, IconPlayerStop, IconRefresh, IconX } from '@tabler/icons-react';
+import { IconCheck, IconHistory, IconListCheck, IconPlayerPlay, IconPlayerStop, IconRefresh, IconX } from '@tabler/icons-react';
 import {
-  clearFinished, editRun, groupById, groupName, removeRun, rerunRun, runSummary, selectRun, stopRun, useAppState, viewVersion,
+  clearFinished, groupById, groupName, removeRun, rerunRun, runSummary, selectRun, stopRun, targetText, useAppState, viewVersion,
   type CheckRun, type Run, type SearchRun,
 } from '../state/store';
-import { formatMoney, plural } from '../lib/format';
+import { plural } from '../lib/format';
 import { arrowNav, GroupTag } from './common';
 import { formatTime } from './checkParts';
 
+/** Every search and check, newest first. Selecting one loads it into the bar and shows its results. */
 export function RunList() {
   const s = useAppState();
   if (!s.runs.length) return null;
@@ -14,18 +15,18 @@ export function RunList() {
   const finished = s.runs.length - running;
 
   return (
-    <section className="searches" aria-labelledby="h-searches">
-      <h3 id="h-searches" className="sub-h">
-        <span className="nowrap">Searches</span>
+    <section className="searches" aria-labelledby="h-history">
+      <h3 id="h-history" className="sub-h">
+        <span className="nowrap">History</span>
         <span className="count">{[running && `${running} running`, finished && `${finished} done`].filter(Boolean).join(' · ')}</span>
         {finished > 0 && <button type="button" className="link push" onClick={clearFinished}>Clear finished</button>}
       </h3>
       <ul className="search-list" onKeyDown={arrowNav}>
         {s.runs.map(r => (
-          <li key={r.id} className={`search-row${r.id === s.selectedRunId ? ' selected' : ''}${r.id === s.editingRunId ? ' editing' : ''}`}>
+          <li key={r.id} className={`search-row${r.id === s.selectedRunId ? ' selected' : ''}`}>
             <button type="button" data-nav className="search-main" aria-current={r.id === s.selectedRunId} onClick={() => selectRun(r.id)}>
               {r.kind === 'search'
-                ? <span className="target num">{formatMoney(r.target, r.targetDecimals)}</span>
+                ? <span className="target num">{targetText(r)}</span>
                 : (
                   <span className="target run-check">
                     <IconListCheck size={15} aria-hidden /> Every number in
@@ -37,10 +38,7 @@ export function RunList() {
             </button>
             {r.history.length > 0 && <VersionPicker run={r} />}
             {r.kind === 'search' ? <SearchStatus run={r} /> : <CheckStatus run={r} />}
-            <button type="button" className="icon-btn" aria-label={r.kind === 'search' ? 'Edit search' : 'Edit check'} title="Edit: load it into the box; running it again keeps this version" onClick={() => editRun(r.id)}>
-              <IconPencil size={13} />
-            </button>
-            <button type="button" className="icon-btn" aria-label="Remove from the list" title="Remove" onClick={() => removeRun(r.id)}>
+            <button type="button" className="icon-btn" aria-label="Remove from history" title="Remove" onClick={() => removeRun(r.id)}>
               <IconX size={13} />
             </button>
           </li>
@@ -51,17 +49,17 @@ export function RunList() {
 }
 
 /** "v3 ▾": the current version plus every earlier one, newest first. */
-function VersionPicker({ run: r }: { run: Run }) {
+export function VersionPicker({ run: r }: { run: Run }) {
   return (
-    <span className="version-pick" title="Past versions of this search">
+    <span className="version-pick" title="Versions of this search">
       <IconHistory size={13} aria-hidden />
       <select
         aria-label="Version"
         value={r.viewing === null ? 'current' : String(r.viewing)}
         onChange={e => viewVersion(r.id, e.target.value === 'current' ? null : Number(e.target.value))}
       >
-        <option value="current">v{r.version} (current)</option>
-        {r.history.map((v, i) => <option key={i} value={i}>v{i + 1} · {formatTime(v.at)}{v.run.kind === 'search' ? ` · ${formatMoney(v.run.target, v.run.targetDecimals)}` : ''}</option>).reverse()}
+        <option value="current">v{r.version} · {formatTime(r.at)} (current)</option>
+        {r.history.map((v, i) => <option key={i} value={i}>v{i + 1} · {formatTime(v.at)}</option>).reverse()}
       </select>
     </span>
   );

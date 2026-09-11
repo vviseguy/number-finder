@@ -61,12 +61,15 @@ export const ROUNDING_LABEL: Record<Rounding, string> = {
 };
 export const ROUNDING_SHORT: Record<Rounding, string> = { dollar: 'whole dollars', cent: 'within 1 cent', exact: 'exact' };
 
+/** "whole dollars", or "±0.25" when a tolerance was typed in the bar. */
+export function roundingPhrase(rounding: Rounding, tolerance?: number): string {
+  return tolerance === undefined ? ROUNDING_SHORT[rounding] : tolerance === 0 ? 'exact' : `±${formatMoney(tolerance)}`;
+}
+
 // How many numbers may add up to the target: 1 (the number itself), a sum of up to N numbers,
 // or any sum. Every choice also finds the number itself, and exact matches are listed first.
 export const MIN_SUM_SIZE = 2;
 export const MAX_SUM_SIZE = 20;
-/** Choices for the Match dropdown: 1 number, sums of up to N, any sum. */
-export const MATCH_CHOICES: (number | null)[] = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20, null];
 export const MADE_OF_HINT = 'How many numbers may add up to it. Exact matches of the number itself always show first.';
 
 /** Short form for summaries: "1 number", "sums of up to 3", "any sum". */

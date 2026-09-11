@@ -5,6 +5,7 @@ import { fileMeta, plural } from '../lib/format';
 import { FileIcon, GroupTag, kindFromName } from './common';
 import { chooseFiles } from './FindBar';
 import { Preview } from './Preview';
+import { Splitter } from './Splitter';
 
 /** Step 1: every file, with a short name you can give it, what was read from it, and its groups. */
 export function FilesView() {
@@ -26,7 +27,7 @@ export function FilesView() {
   }
 
   return (
-    <div className="workspace files-workspace">
+    <div className="workspace">
       <main className="main files-main">
         <h2 className="view-title">Files <span className="count">{plural(s.files.length, 'file')}</span></h2>
         <div className="files-table" role="table">
@@ -51,6 +52,7 @@ export function FilesView() {
         </div>
         <p className="hint">Long names are shortened to what tells them apart (… marks words every file shares); the full name sits underneath. The pencil sets your own short name. Click a file to see it on the right.</p>
       </main>
+      <Splitter />
       <aside className="side-pane" aria-label="File preview">
         {previewFile && s.previewId ? <Preview amountId={s.previewId} /> : (
           <div className="pane-empty">

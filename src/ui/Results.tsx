@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { IconArrowsExchange, IconChevronDown, IconHistory, IconSearch } from '@tabler/icons-react';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, showPreview, shownRun, useAppState, viewVersion,
+  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, showPreview, shownRun, targetText, useAppState, viewVersion,
   type Run, type SearchRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
-import { formatMoney, locationShort, madeOfPhrase, ROUNDING_SHORT } from '../lib/format';
+import { formatMoney, locationShort, madeOfPhrase, roundingPhrase } from '../lib/format';
 import { findNearMiss } from '../lib/nearmiss';
 import { passesTerms, termsPhrase } from '../lib/query';
 import type { Match, MatchItem } from '../types';
@@ -15,34 +15,46 @@ import { Equation } from './Equation';
 import { formatTime } from './checkParts';
 import { Money } from './Money';
 import { NearButton } from './NearButton';
+import { VersionPicker } from './RunList';
 
 export function Results() {
   const s = useAppState();
   const live = s.runs.find(r => r.id === s.selectedRunId);
   if (!live) {
     return s.files.length ? (
-      <p className="empty-note main-empty">Type a number in the box above and press Enter, or open a file and click one of its numbers.</p>
+      <p className="empty-note main-empty">Type a number in the bar above and press Enter, or open a file and click one of its numbers.</p>
     ) : null;
   }
   const { run, past } = shownRun(live);
   return (
     <>
-      {past && <VersionBanner live={live} />}
+      <VersionBar live={live} past={past} />
       {run.kind === 'search' ? <SearchResults run={run} readOnly={past} /> : <CheckResults run={run} readOnly={past} />}
     </>
   );
 }
 
-function VersionBanner({ live }: { live: Run }) {
+/** The slim bar above results: which version this is, when it ran, and how to move between versions. */
+function VersionBar({ live, past }: { live: Run; past: boolean }) {
+  if (!past) {
+    return (
+      <div className="version-bar" role="status">
+        <IconHistory size={14} aria-hidden />
+        <span>Version {live.version}{live.version > 1 ? ` of ${live.version}` : ''} · {formatTime(live.at)}</span>
+        {live.history.length > 0 && <span className="push"><VersionPicker run={live} /></span>}
+      </div>
+    );
+  }
   const i = live.viewing!;
   const v = live.history[i];
   return (
-    <div className="version-banner" role="status">
+    <div className="version-bar past" role="status">
       <IconHistory size={14} aria-hidden />
-      <span>Viewing version {i + 1} of {live.version}, from {formatTime(v.at)}. The current version is v{live.version}.</span>
+      <span>Version {i + 1} of {live.version} · {formatTime(v.at)} · read-only; the current version is v{live.version}</span>
       <span className="push line">
+        <VersionPicker run={live} />
         <button type="button" className="btn sm" onClick={() => viewVersion(live.id, null)}>Back to current</button>
-        <button type="button" className="btn sm" onClick={() => restoreVersion(live.id, i)}>Restore this version</button>
+        <button type="button" className="btn sm" onClick={() => restoreVersion(live.id, i)}>Restore as v{live.version + 1}</button>
       </span>
     </div>
   );
@@ -56,7 +68,7 @@ function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean
   return (
     <section className="results" aria-labelledby="h-results">
       <h3 id="h-results" className="sub-h">
-        <span className="nowrap">Results for <span className="num">{formatMoney(r.target, r.targetDecimals)}</span></span>
+        <span className="nowrap">Results for <span className="num">{targetText(r)}</span></span>
         {r.matches.length > 0 && <span className="count push">↑ ↓ to move · hover a number to see it elsewhere</span>}
       </h3>
       {r.status === 'running' && !r.matches.length && <p className="muted pad">Searching…</p>}
@@ -92,7 +104,7 @@ function ItemRow({ item, match, run, previewId, nested }: { item: MatchItem; mat
   const link = useLinkClass(hit?.amount ?? null);
   if (!hit) return null;
   const { amount, file } = hit;
-  const off = match && Math.abs(match.diff) >= 0.005;
+  const off = match && !run.range && Math.abs(match.diff) >= 0.005;
   const roundsTo = off && run.targetDecimals === 0 && Math.round(match.sum) === run.target;
   return (
     <button
@@ -120,28 +132,31 @@ function NotFound({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   const idx = amountIndex(s);
   const candidates = groupAmounts(s, r.settings.groupId)
     .filter(a => a.id !== r.originId && passesTerms(a, idx.get(a.id) ? fileTermText(idx.get(a.id)!.file) : '', r.terms));
-  const near = findNearMiss(r.target, r.targetDecimals, candidates, a => a.value, r.settings.allowFlips);
-  const how = `${madeOfPhrase(r.settings.maxCount)}, ${ROUNDING_SHORT[r.settings.rounding]}`;
+  const near = r.range ? null : findNearMiss(r.target, r.targetDecimals, candidates, a => a.value, r.settings.allowFlips);
+  const how = r.range ? '' : ` ${madeOfPhrase(r.settings.maxCount)}, ${roundingPhrase(r.settings.rounding, r.settings.tolerance)}`;
   const filters = termsPhrase(r.terms);
-  const tries: { label: string; patch: Parameters<typeof retryWith>[4] }[] = [];
-  if (r.settings.maxCount !== null && r.settings.maxCount < 3) tries.push({ label: 'Try sums of up to 3', patch: { maxCount: 3, groupId: r.settings.groupId } });
-  if (!r.settings.allowFlips) tries.push({ label: 'Also try negatives', patch: { allowFlips: true, groupId: r.settings.groupId } });
-  if (r.settings.rounding === 'exact') tries.push({ label: 'Round to whole dollars', patch: { rounding: 'dollar', groupId: r.settings.groupId } });
+  const tries: { label: string; patch: Parameters<typeof retryWith>[1] }[] = [];
+  if (!r.range) {
+    if (r.settings.maxCount !== null && r.settings.maxCount < 3) tries.push({ label: 'Try sums of up to 3', patch: { maxCount: 3 } });
+    if (!r.settings.allowFlips) tries.push({ label: 'Also try negatives', patch: { allowFlips: true } });
+    if (r.settings.rounding === 'exact' || r.settings.tolerance === 0) tries.push({ label: 'Round to whole dollars', patch: { rounding: 'dollar' } });
+  }
 
   return (
     <div className="not-found">
-      <p><b>Not found.</b> Nothing in {groupName(s, r.settings.groupId)} makes {formatMoney(r.target, r.targetDecimals)} {how}{filters && ` (${filters})`}.</p>
+      <p><b>Not found.</b> {r.range ? `No number in ${groupName(s, r.settings.groupId)} falls between ${targetText(r).replace('..', ' and ')}` : `Nothing in ${groupName(s, r.settings.groupId)} makes ${formatMoney(r.target, r.targetDecimals)}${how}`}{filters && ` (${filters})`}.</p>
       {r.reason === 'timeLimit' && <p className="muted">The search hit its time limit before checking every combination.</p>}
       {near
         ? <NearButton near={near} target={r.target} decimals={r.targetDecimals} onShow={showPreview} />
-        : <p className="muted">Nothing in {groupName(s, r.settings.groupId)} is close to it either.</p>}
+        : !r.range && <p className="muted">Nothing in {groupName(s, r.settings.groupId)} is close to it either.</p>}
       {!readOnly && tries.length > 0 && (
         <div className="line">
           {tries.map(t => (
-            <button key={t.label} type="button" className="btn sm" onClick={() => retryWith(r.target, r.targetDecimals, r.originId, r.terms, t.patch)}>
+            <button key={t.label} type="button" className="btn sm" title="Runs as a new version of this search" onClick={() => retryWith(r.id, t.patch)}>
               <IconSearch size={12} aria-hidden /> {t.label}
             </button>
           ))}
+          <span className="hint">each runs as a new version</span>
         </div>
       )}
     </div>

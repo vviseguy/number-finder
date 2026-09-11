@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
-import { IconPencil, IconSearch, IconX } from '@tabler/icons-react';
-import { addFiles, ALL_FILES, cancelEdit, clearFindText, groupById, setFind, setFindText, setScope, submitFind, useAppState } from '../state/store';
-import { formatMoney, madeOfLabel, MADE_OF_HINT, MATCH_CHOICES, ROUNDING_LABEL } from '../lib/format';
+import { useEffect, useRef, useState } from 'react';
+import { IconSearch, IconX } from '@tabler/icons-react';
+import { addFiles, ALL_FILES, clearFindText, groupById, setFind, setFindText, setScope, submitFind, useAppState } from '../state/store';
+import { MADE_OF_HINT, MAX_SUM_SIZE, MIN_SUM_SIZE, ROUNDING_LABEL } from '../lib/format';
 import { parseQuery, termsSentence } from '../lib/query';
 import type { Rounding } from '../types';
 
@@ -9,43 +9,70 @@ const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt';
 
 export function chooseFiles() { document.getElementById('file-input')?.click(); }
 
+/** Shown in turn in the empty bar: each one is something you can type. */
+const HINTS = [
+  '3,235',
+  '3,235 -hours  ·  skip numbers labeled “hours”',
+  '3,234.56 interest  ·  only numbers labeled “interest”',
+  '3,235 85,000  ·  two numbers, two searches',
+  '3,200..3,300  ·  every number in a range',
+  '3,235 sums:3  ·  sums of up to 3 numbers',
+  '3,235 ±0.50  ·  within 50 cents',
+  '3,235 neg  ·  let numbers count as negative',
+  '3,235 in:Source  ·  look in a group by name',
+  '-"hourly rate"  ·  quotes keep a phrase together',
+];
+
 /**
- * The search bar under the header, on every view. Reads as a sentence:
- *   Find [a number ▾]  [3,235 -hours]  in [All files ▾]
- *   Find [every number in 2025 return ▾]  [filters]  against [Source docs ▾]
- * The query stays in the bar after searching; selecting a search in the list loads it back.
+ * The search bar under the header, on every view. One number mode:
+ *   [One number | Whole group]  [🔍 3,235 -hours]  in [All files ▾]  (Search)
+ * Whole-group mode looks up every number in a group:
+ *   [One number | Whole group]  Every number in [2025 return ▾]  [🔍 filters]  against [Source docs ▾]  (Search)
+ * The query stays in the bar after searching; selecting a search in the history loads it back.
  */
 export function FindBar() {
   const s = useAppState();
   const f = s.find;
   const groupId = f.groupId === ALL_FILES || groupById(s, f.groupId) ? f.groupId : ALL_FILES;
   const scope = groupById(s, s.scopeGroupId);
-  const editing = s.runs.find(r => r.id === s.editingRunId);
+  const whole = s.scopeGroupId !== null;
   const input = useRef<HTMLInputElement>(null);
+  const [hint, setHint] = useState(0);
+  const [focused, setFocused] = useState(false);
   const q = parseQuery(s.findText);
-  const numbers = q.value === null ? 0 : 1 + q.extraNumbers.length;
-  const echo = scope && q.value !== null
-    ? `"Every number in ${scope.name}" is picked, so the words here are filters. Choose "a number" to search for ${q.valueText}.`
-    : [numbers > 1 ? `${numbers} numbers: each starts its own search.` : '', termsSentence(q.terms)].filter(Boolean).join(' ');
+  const echo = q.errors[0]
+    ?? (whole && (q.numbers.length || q.range)
+      ? `Whole-group mode looks up every number in ${scope?.name ?? 'the group'}; the words here are filters. Switch to One number to search for ${q.numbers[0]?.text ?? q.range?.text}.`
+      : [q.numbers.length > 1 ? `${q.numbers.length} numbers: each is its own search.` : '', termsSentence(q.terms)].filter(Boolean).join(' '));
 
-  useEffect(() => { if (s.editingRunId) input.current?.focus(); }, [s.editingRunId]);
+  // Rotate the hints while the bar is empty and not being typed in.
+  useEffect(() => {
+    if (s.findText || focused) return;
+    const t = setInterval(() => setHint(h => (h + 1) % HINTS.length), 4000);
+    return () => clearInterval(t);
+  }, [s.findText, focused]);
+
+  const sums = typeof f.maxCount === 'number' && f.maxCount > 1;
+  const [sumSize, setSumSize] = useState(sums ? f.maxCount as number : 3);
+  useEffect(() => { if (typeof f.maxCount === 'number' && f.maxCount > 1) setSumSize(f.maxCount); }, [f.maxCount]);
 
   return (
-    <section className="strip" aria-label="Find a number">
-      {editing && (
-        <p className="editing-banner">
-          <IconPencil size={13} aria-hidden /> Editing {editing.kind === 'search' ? `the search for ${formatMoney(editing.target, editing.targetDecimals)}` : 'this check'} · pressing {scope ? 'Check' : 'Find'} replaces it and keeps version {editing.version}.
-          <button type="button" className="link" onClick={cancelEdit}>Cancel</button>
-        </p>
-      )}
+    <section className="strip" aria-label="Search">
       <form className="searchbar" onSubmit={e => { e.preventDefault(); submitFind(); }}>
-        <label className="what">
-          <span className="sentence">Find</span>
-          <select value={s.scopeGroupId ?? 'number'} aria-label="What to find" onChange={e => setScope(e.target.value === 'number' ? null : e.target.value)}>
-            <option value="number">a number</option>
-            {s.groups.map(g => <option key={g.id} value={g.id}>every number in {g.name}</option>)}
-          </select>
-        </label>
+        <span className="mode" role="radiogroup" aria-label="What to find">
+          <button type="button" role="radio" aria-checked={!whole} className={!whole ? 'on' : ''} onClick={() => setScope(null)}>One number</button>
+          <button type="button" role="radio" aria-checked={whole} className={whole ? 'on' : ''} onClick={() => setScope(s.scopeGroupId ?? s.groups.find(g => g.id !== groupId)?.id ?? s.groups[0]?.id ?? null)} disabled={!s.groups.length} title={s.groups.length ? 'Look up every number in a group' : 'Make a group first (step 2)'}>
+            Whole group
+          </button>
+        </span>
+        {whole && (
+          <label className="every">
+            <span className="sentence">Every number in</span>
+            <select value={s.scopeGroupId ?? ''} aria-label="Group to check" onChange={e => setScope(e.target.value)}>
+              {s.groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </label>
+        )}
         <div className="query">
           <IconSearch size={17} stroke={1.75} className="query-icon" aria-hidden />
           <input
@@ -53,9 +80,11 @@ export function FindBar() {
             ref={input}
             autoComplete="off"
             spellCheck={false}
-            placeholder={scope ? 'Filters, like -hours (optional)' : 'A number, like 3,235 — or several'}
+            placeholder={whole ? 'Filters, like -hours (optional)' : HINTS[hint]}
             value={s.findText}
             onChange={e => setFindText(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
           />
           {s.findText && (
             <button type="button" className="icon-btn clear" aria-label="Clear" title="Clear" onClick={() => { clearFindText(); input.current?.focus(); }}>
@@ -64,25 +93,47 @@ export function FindBar() {
           )}
         </div>
         <label className="where">
-          <span className="sentence">{scope ? 'against' : 'in'}</span>
+          <span className="sentence">{whole ? 'against' : 'in'}</span>
           <select value={groupId} onChange={e => setFind({ groupId: e.target.value })} aria-label="Group to search">
             <option value={ALL_FILES}>All files</option>
             {s.groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
         </label>
-        <button type="submit" className="btn primary go">{editing ? (scope ? 'Check again' : 'Find again') : scope ? 'Check' : 'Find'}</button>
+        <button type="submit" className="btn primary go">Search</button>
       </form>
-      {echo && <p className="query-echo" role="status">{echo}</p>}
+      {echo && <p className={`query-echo${q.errors.length ? ' bad' : ''}`} role="status">{echo}</p>}
       <div className="opts">
         <label className="opt" title={MADE_OF_HINT}>
           <span>Match</span>
-          <select value={f.maxCount === null ? 'any' : String(f.maxCount)} aria-label="Match" onChange={e => setFind({ maxCount: e.target.value === 'any' ? null : Number(e.target.value) })}>
-            {MATCH_CHOICES.map(c => <option key={String(c)} value={c === null ? 'any' : String(c)}>{madeOfLabel(c)}</option>)}
+          <select
+            value={f.maxCount === 1 ? '1' : f.maxCount === null ? 'any' : 'sums'}
+            aria-label="Match"
+            onChange={e => setFind({ maxCount: e.target.value === '1' ? 1 : e.target.value === 'any' ? null : sumSize })}
+          >
+            <option value="1">1 number</option>
+            <option value="sums">Sums of up to</option>
+            <option value="any">Any sum</option>
           </select>
+          {sums && (
+            <input
+              type="number"
+              className="sum-size"
+              min={MIN_SUM_SIZE}
+              max={MAX_SUM_SIZE}
+              step={1}
+              value={sumSize}
+              aria-label="Most numbers in a sum"
+              onChange={e => {
+                const n = Number(e.target.value);
+                setSumSize(n);
+                if (Number.isInteger(n) && n >= MIN_SUM_SIZE && n <= MAX_SUM_SIZE) setFind({ maxCount: n });
+              }}
+            />
+          )}
         </label>
         <label className="opt">
           <span>Rounding</span>
-          <select value={f.rounding} aria-label="Rounding" onChange={e => setFind({ rounding: e.target.value as Rounding })}>
+          <select value={f.rounding} aria-label="Rounding" onChange={e => setFind({ rounding: e.target.value as Rounding, tolerance: undefined })}>
             {(Object.keys(ROUNDING_LABEL) as Rounding[]).map(r => <option key={r} value={r}>{ROUNDING_LABEL[r]}</option>)}
           </select>
         </label>
@@ -93,7 +144,6 @@ export function FindBar() {
             <option value="on">also try negatives</option>
           </select>
         </label>
-        <span className="hint push">Add a word to search only numbers labeled with it, or <b>-word</b> to skip them, like <b>-hours</b>.</span>
       </div>
       <input
         id="file-input"

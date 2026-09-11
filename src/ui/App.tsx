@@ -7,6 +7,7 @@ import { GroupsView } from './GroupsView';
 import { RunList } from './RunList';
 import { Results } from './Results';
 import { SidePane } from './SidePane';
+import { Splitter } from './Splitter';
 import { NoticeBar } from './NoticeBar';
 import { ScrollRail } from './ScrollRail';
 
@@ -62,10 +63,17 @@ export function App() {
   ];
 
   return (
-    <div className="shell">
+    <div className="shell" style={{ ['--pane' as string]: `${s.paneWidth}px` }}>
       <header className="topbar">
-        <IconFileSearch className="brand-icon" size={20} stroke={1.75} aria-hidden />
-        <h1>Number finder</h1>
+        <div className="brand">
+          <IconFileSearch className="brand-icon" size={22} stroke={1.75} aria-hidden />
+          <div>
+            <h1>Number finder</h1>
+            <p className="brand-sub" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
+              <IconLock size={11} stroke={2} aria-hidden /> Files stay on this computer
+            </p>
+          </div>
+        </div>
         <nav className="steps" aria-label="Steps">
           {steps.map((st, i) => (
             <span key={st.view} className="step-wrap">
@@ -80,9 +88,6 @@ export function App() {
         <span className="drop-chip">
           <IconUpload size={14} stroke={1.75} aria-hidden />
           <span>Drop files anywhere, or <button type="button" className="link" onClick={chooseFiles}>choose files</button></span>
-        </span>
-        <span className="local-badge" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
-          <IconLock size={14} stroke={2} aria-hidden /> Files stay on this computer
         </span>
         <ThemeToggle theme={s.theme} />
       </header>
@@ -100,6 +105,7 @@ export function App() {
             </main>
             <ScrollRail target={main} />
           </div>
+          <Splitter />
           <SidePane />
         </div>
       )}
