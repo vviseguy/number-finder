@@ -13,10 +13,12 @@
 //   3,235 sums:3             sums of up to 3 numbers; sums:=3 exactly 3; sums:2..4 between; sums:2+ at least 2; sums:any
 //   3,235 ±0.50  or  ~0.50   within 50 cents (~ before a number is a tolerance, before a word a fuzzy match)
 //   3,235 neg                let numbers count as negative; neg:1 at most one of them; neg:0 none
+//   3,235 mode:clumped       search mode for sums: mode:clumped, mode:spread, mode:across (see lib/rank.ts)
 // A minus directly before a digit is a negative number ("-265.44"), not a filter. Filters apply before
 // the search, so a skipped number can never be part of a sum.
 
 import type { Amount } from '../types';
+import type { Grouping } from './rank';
 import { fuzzyIncludes } from './fuzzy';
 import { decimalsOf, parseAmountInput } from './format';
 
@@ -55,6 +57,8 @@ export interface Query {
   negatives: boolean | undefined;
   /** With negatives: at most this many numbers counted as negative (neg:1); undefined = no limit. */
   maxFlips: number | undefined;
+  /** Search mode for sums (mode:clumped); undefined when not given. */
+  grouping: Grouping | undefined;
   errors: string[];
 }
 
@@ -63,7 +67,7 @@ const TOKEN = /[^\s"]*"[^"]*"?|\S+/g;
 export function parseQuery(text: string): Query {
   const q: Query = {
     numbers: [], range: null, terms: emptyTerms(), inGroup: null, checkGroup: null,
-    maxCount: undefined, minCount: undefined, tolerance: undefined, negatives: undefined, maxFlips: undefined, errors: [],
+    maxCount: undefined, minCount: undefined, tolerance: undefined, negatives: undefined, maxFlips: undefined, grouping: undefined, errors: [],
   };
   const unquote = (s: string) => s.replace(/^"|"$/g, '').trim();
   const add = (list: string[], word: string) => { if (word && !list.includes(word)) list.push(word); };
@@ -95,6 +99,15 @@ export function parseQuery(text: string): Query {
       else if ((r = /^(\d+)\.\.(\d+)$/.exec(v)) && +r[1] >= 1 && +r[2] >= +r[1]) { q.minCount = +r[1] > 1 ? +r[1] : undefined; q.maxCount = +r[2]; }
       else if ((r = /^(\d+)\+$/.exec(v)) && +r[1] >= 1) { q.minCount = +r[1] > 1 ? +r[1] : undefined; q.maxCount = null; }
       else q.errors.push(`"${raw}" should be sums:3, sums:=3 (exactly), sums:2..4, sums:2+, or sums:any.`);
+      continue;
+    }
+
+    m = /^mode:(.+)$/i.exec(raw);
+    if (m) {
+      const v = m[1].toLowerCase();
+      const g: Grouping | null = v.startsWith('clump') ? 'clumped' : v.startsWith('spread') ? 'spread' : v.startsWith('across') || v === 'files' ? 'across' : null;
+      if (g) q.grouping = g;
+      else q.errors.push(`"${raw}" should be mode:clumped, mode:spread, or mode:across.`);
       continue;
     }
 

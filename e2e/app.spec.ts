@@ -130,7 +130,7 @@ test('the bar grammar: a range, sums:, ±, neg, and in:', async ({ page }) => {
   await expect(page.locator('.version-bar')).toContainText('Version 1');
 
   await find(page, '3,234.56 sums:2 neg ±0');
-  await expect(page.locator('.search-row').first()).toContainText('sums of up to 2 · exact · negatives');
+  await expect(page.locator('.search-row').first()).toContainText('sums of up to 2, across files · exact · negatives');
   await expect(page.locator('.combo').first()).toContainText('= 3,234.56');
 
   await makeGroup(page, 'Source docs', ['1099-INT.pdf']);
@@ -276,7 +276,7 @@ test('at most N numbers counted as negative', async ({ page }) => {
   await page.getByLabel('Negatives').selectOption('upto');
   await expect(page.locator('.opt', { hasText: 'Negatives' }).locator('.sum-size')).toHaveValue('1');
   await find(page, '3,234.56'); // 3,500.00 − 265.44
-  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 2 · exact · up to 1 negative');
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 2, across files · exact · up to 1 negative');
   await expect(page.locator('.combo-title').first()).toContainText('1 counted as negative');
   await find(page, '3,234.56 neg:0'); // no pair without a negative
   await expect(page.locator('.not-found')).toBeVisible();
@@ -284,6 +284,55 @@ test('at most N numbers counted as negative', async ({ page }) => {
   await find(page, '3,234.56 neg:1');
   await expect(page.locator('.combo-title').first()).toContainText('1 counted as negative');
   await page.screenshot({ path: path.join(SHOTS, '10-exactly-negatives.png') });
+});
+
+test('search mode: shown only for sums, and it decides which groupings come first', async ({ page }) => {
+  await open(page, SOURCES);
+  const modePill = page.locator('.opt', { hasText: 'Search mode' });
+  await expect(modePill).toHaveCount(0); // "to number": no groupings to choose between
+  await page.getByLabel('Match').selectOption('exact');
+  await page.getByLabel('Most numbers in a sum').fill('3');
+  await expect(modePill.locator('.pick-text')).toHaveText('across files');
+
+  // How many files a sum's title names: "in X" = 1, "across A and B" = 2, "across A, B and 3 other files" = 5.
+  const filesIn = (title: string) => {
+    const others = /and (\d+) other files?/.exec(title);
+    if (others) return 2 + Number(others[1]);
+    return / across /.test(title) ? 2 : 1;
+  };
+  const titles = () => page.locator('.combo-title').allInnerTexts();
+
+  await find(page, '90,235'); // wages + interest + dividends: one number from each of three files
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, across files');
+  await expect(page.locator('.combo-title').first()).toContainText('and 1 other file');
+  let t = await titles();
+  expect(filesIn(t[0])).toBe(Math.max(...t.map(filesIn)));
+
+  await page.getByLabel('Search mode').selectOption('clumped');
+  await find(page, '90,235'); // same number, new mode: a new version of the same search
+  await expect(page.locator('.search-row')).toHaveCount(1);
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, clumped');
+  t = await titles();
+  expect(filesIn(t[0])).toBe(Math.min(...t.map(filesIn)));
+
+  await find(page, '90,235 mode:spread');
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, spread within files');
+  await page.getByLabel('Match', { exact: true }).selectOption('1'); // exact: the preview's "Next match" buttons also say "match"
+  await expect(modePill).toHaveCount(0);
+});
+
+test('the preview names the file in large type, with where in it underneath', async ({ page }) => {
+  await open(page, ['1099-INT.pdf', 'workpapers.xlsx']);
+  await page.getByLabel('Rounding').selectOption('exact');
+  await find(page, '3,234.56');
+  const head = page.locator('.side-pane .preview-head');
+  await expect(head.locator('.preview-name')).toHaveText('1099-INT.pdf');
+  await expect(head.locator('.preview-where')).toContainText('Page 1');
+  await expect(head.locator('.preview-name')).toHaveCSS('font-weight', '650');
+  await page.locator('.result-row', { hasText: 'Interest!D9' }).click();
+  await expect(head.locator('.preview-name')).toHaveText('workpapers.xlsx');
+  await expect(head.locator('.preview-where')).toContainText('Sheet Interest · cell D9');
+  await page.screenshot({ path: path.join(SHOTS, '11-preview-head.png') });
 });
 
 test('dragging the splitter scales the drawn page instead of redrawing it on every pixel', async ({ page }) => {
@@ -318,7 +367,9 @@ test('the option pills are one dropdown each, with the sum size inside the Match
   const sel = (await match.locator('select').boundingBox())!;
   expect(Math.abs(sel.width - pill.width)).toBeLessThan(3); // the select covers the whole pill, so a click anywhere opens it
   await page.getByLabel('Match').selectOption('upto');
-  await expect(match.locator('.sum-size + .pick-chev')).toHaveCount(1); // …Sums of up to [3] ▾
+  await expect(match.locator('.sum-size + .pick-chev')).toHaveCount(1); // Match  to sum · up to [3] ▾
+  await expect(match.locator('.pick-text')).toHaveText('to sum · up to');
+  await expect(match.locator('option')).toHaveText(['to number', 'to sum (Any count)', 'to sum (Up to count)', 'to sum (Specify count)']);
   const negatives = page.locator('.opt', { hasText: 'Negatives' });
   expect((await negatives.boundingBox())!.width).toBeLessThan(130);
 });

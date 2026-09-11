@@ -31,7 +31,8 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
 1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. Long file names are shortened to what tells them apart: words that appear in every file's name are replaced by `…`, so *Alpha Client 2025 Bank Statement Jan.pdf* shows as `Alpha…Jan.pdf` next to its Beta and February siblings, with the full name underneath and in tooltips. The pencil sets your own short name instead, remembered for next time. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
 3. **Find.** Type a number in the search bar (or click any number in a preview) and press Enter; *in* picks the group to look in. The query stays in the bar, and selecting a search in the history loads it back. Under the bar:
-   - **Match:** *1 number* (where does it appear?), *Sums of up to* a number you set (2 to 20), *Sums of exactly* that many, or *Any sum*. Exact matches of the number itself show first, except in *exactly* mode, which leaves single numbers out.
+   - **Match:** *to number* (where does it appear?), *to sum (Any count)*, *to sum (Up to count)* with a count you set (2 to 20), or *to sum (Specify count)* for exactly that many. Exact matches of the number itself show first, except with a specified count, which leaves single numbers out.
+   - **Search mode** (sums only): which groupings come first. *Clumped* puts numbers next to each other in one file on top; *Spread (within files)* prefers one file but numbers far apart in it; *Across files*, the default, prefers one number from each file, like a return line built from several source documents. Sums collect more matches than they show first, so the mode has real choices; a group check ranks each row's matches the same way.
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
    - **Negatives:** *off*, *on* (any number of them may count as negative), or *up to* a number you set, so a sum can use one penalty but not turn half the numbers around.
 
@@ -50,6 +51,7 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
    | `3,235 sums:3` | sums of up to 3 numbers; `sums:=3` exactly 3; `sums:2..4` between 2 and 4; `sums:2+` at least 2; `sums:any`; `sums:1` |
    | `3,235 ±0.50` or `~0.50` | within 50 cents; typing `+-` or `-+` in the bar turns into `±` |
    | `3,235 neg` | let numbers count as negative; `neg:1` at most one of them; `neg:0` none |
+   | `3,235 sums:3 mode:clumped` | search mode for sums: `mode:clumped`, `mode:spread`, `mode:across` |
 
    Words like `in:`, `sums:`, `±`, and `neg` override the pills for that one search. Filters apply before the search, so a skipped number can never be part of a sum.
 

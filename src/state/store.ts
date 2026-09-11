@@ -25,7 +25,7 @@ import { canOpenFolder, canPickSaveLocation, folderPermission, forgetFolderHandl
 import { isSetupText, parseSetup, sameSetup, serializeSetup, SETUP_FILE_NAME, type SavedRun, type SavedSetup } from '../lib/setupfile';
 import { formatMoney, madeOfLabel, negativesLabel, parseLimit, plural, roundingPhrase, uid } from '../lib/format';
 import { checkToken, hasTerms, normalizeTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, termText, type Terms } from '../lib/query';
-import { SORT_LABEL, sortMatches, type ItemInfo, type ResultSort } from '../lib/rank';
+import { DEFAULT_GROUPING, GROUPING_SHORT, groupingOf, SORT_LABEL, sortMatches, type Grouping, type ItemInfo, type ResultSort } from '../lib/rank';
 import { shortNames } from '../lib/names';
 
 // These are read while this module loads (loadSetup below), so they must be declared before that line.
@@ -62,12 +62,15 @@ export interface Group { id: string; name: string; color: number; members: Group
 
 /**
  * groupId is the group searched IN. minCount (default 1) with maxCount = "sums of exactly N" or a range;
- * maxFlips (default no limit) caps how many numbers may count as negative; tolerance, when set, replaces
- * the rounding preset for that run.
+ * maxFlips (default no limit) caps how many numbers may count as negative; grouping is the search mode
+ * for sums (default across files; see lib/rank.ts); tolerance, when set, replaces the rounding preset.
  */
 export interface FindSettings {
-  groupId: string; maxCount: number | null; minCount?: number; rounding: Rounding; allowFlips: boolean; maxFlips?: number; tolerance?: number;
+  groupId: string; maxCount: number | null; minCount?: number; rounding: Rounding; allowFlips: boolean; maxFlips?: number; grouping?: Grouping; tolerance?: number;
 }
+
+/** The search mode that applies to a run: only sums have one. */
+const modeOf = (st: FindSettings): Grouping | undefined => (st.maxCount === 1 ? undefined : groupingOf(st));
 
 type RunStatus = 'idle' | 'running' | 'done' | 'stopped';
 
@@ -197,7 +200,7 @@ export function useAppState(): AppState {
 
 // Function declarations, not consts: loadSetup() runs at module load, before consts below it exist.
 function defaultFind(): FindSettings {
-  return { groupId: ALL_FILES, maxCount: 1, rounding: 'dollar', allowFlips: false };
+  return { groupId: ALL_FILES, maxCount: 1, rounding: 'dollar', allowFlips: false, grouping: DEFAULT_GROUPING };
 }
 
 function restoreRun(r: SavedRun): Run {
@@ -412,7 +415,8 @@ export function groupsOfFile(s: AppState, key: string): Group[] {
 /** "in Source docs · sums of up to 3 · whole dollars · negatives · skipping “hours”" */
 export function runSummary(s: AppState, r: { settings: FindSettings; terms: Terms }): string {
   const st = r.settings;
-  const parts = [`in ${groupName(s, st.groupId)}`, madeOfLabel(st.maxCount, st.minCount), roundingPhrase(st.rounding, st.tolerance)];
+  const mode = modeOf(st);
+  const parts = [`in ${groupName(s, st.groupId)}`, `${madeOfLabel(st.maxCount, st.minCount)}${mode ? `, ${GROUPING_SHORT[mode]}` : ''}`, roundingPhrase(st.rounding, st.tolerance)];
   const neg = negativesLabel(st.allowFlips, st.maxFlips);
   if (neg) parts.push(neg);
   const t = termsPhrase(r.terms);
@@ -435,9 +439,11 @@ export function shownRun(r: Run): { run: Run; past: boolean } {
 function itemInfo(s: AppState, id: string): ItemInfo | undefined {
   const hit = amountIndex(s).get(id);
   if (!hit) return undefined;
+  const loc = hit.amount.location;
   return {
     fileOrder: s.files.indexOf(hit.file),
     position: Number(id.slice(id.lastIndexOf(':') + 1)) || 0,
+    section: loc.kind === 'pdf' ? `p${loc.page}` : loc.sheet,
     fileLabel: fileLabel(hit.file),
     text: termText(hit.amount, fileTermText(hit.file)),
   };
@@ -448,7 +454,7 @@ let sortCache: { s: AppState; r: SearchRun; sort: ResultSort; out: Match[] } | n
 /** A search's matches in the chosen order (see lib/rank.ts). Cached for the last run shown. */
 export function sortedMatches(s: AppState, r: SearchRun): Match[] {
   if (sortCache && sortCache.s === s && sortCache.r === r && sortCache.sort === s.resultSort) return sortCache.out;
-  const out = sortMatches(r.matches, s.resultSort, r.terms, id => itemInfo(s, id));
+  const out = sortMatches(r.matches, s.resultSort, r.terms, id => itemInfo(s, id), modeOf(r.settings));
   sortCache = { s, r, sort: s.resultSort, out };
   return out;
 }
@@ -720,7 +726,8 @@ const sameTerms = (a: Terms, b: Terms) =>
   sameList(a.include, b.include) && sameList(a.exclude, b.exclude) && sameList(a.fuzzy, b.fuzzy) && sameList(a.prefer, b.prefer);
 const sameSettings = (a: FindSettings, b: FindSettings) =>
   a.groupId === b.groupId && a.maxCount === b.maxCount && (a.minCount ?? 1) === (b.minCount ?? 1) && a.rounding === b.rounding
-  && a.allowFlips === b.allowFlips && (a.maxFlips ?? -1) === (b.maxFlips ?? -1) && (a.tolerance ?? -1) === (b.tolerance ?? -1);
+  && a.allowFlips === b.allowFlips && (a.maxFlips ?? -1) === (b.maxFlips ?? -1) && (a.tolerance ?? -1) === (b.tolerance ?? -1)
+  && modeOf(a) === modeOf(b);
 const close = (a: number, b: number) => Math.abs(a - b) < 0.005;
 
 /** The search for this number (or range), whichever version it's on. */
@@ -750,6 +757,7 @@ export function submitFind(): boolean {
   }
   if (q.maxCount !== undefined) { settings.maxCount = q.maxCount; settings.minCount = q.minCount; }
   if (q.negatives !== undefined) { settings.allowFlips = q.negatives; settings.maxFlips = q.negatives ? q.maxFlips : undefined; }
+  if (q.grouping !== undefined) settings.grouping = q.grouping;
   if (q.tolerance !== undefined) settings.tolerance = q.tolerance;
 
   if (q.checkGroup !== null) {
@@ -852,7 +860,10 @@ function buildRequest(
 
 // ---------- single searches ----------
 
+// Sums collect more matches than they show first, so the search mode has real choices to put on top.
 const SEARCH_BUDGET = { maxResults: 50, timeLimitMs: 10_000 };
+const SUM_BUDGET = { maxResults: 150, timeLimitMs: 10_000 };
+const budgetFor = (st: FindSettings) => (st.maxCount === 1 ? SEARCH_BUDGET : SUM_BUDGET);
 
 const snapshot = (r: Run): Version => ({ at: r.at, run: { ...r, history: [], viewing: null } });
 
@@ -860,7 +871,7 @@ export function runSearch(
   target: number, decimals: number, range: { lo: number; hi: number } | null, terms: Terms, originId: string | null,
   settings: FindSettings = currentSettings(),
 ): boolean {
-  const request = buildRequest(state, settings, target, originId, terms, SEARCH_BUDGET, range);
+  const request = buildRequest(state, settings, target, originId, terms, budgetFor(settings), range);
   if (typeof request === 'string') { notify('warn', request); return false; }
   const run: SearchRun = {
     kind: 'search', id: uid('s'), target, targetDecimals: decimals, range, originId, settings, terms, status: 'running', reason: null,
@@ -873,7 +884,7 @@ export function runSearch(
 
 /** A new version of an existing search: the old one goes into its history. */
 function replaceSearch(old: SearchRun, target: number, decimals: number, range: { lo: number; hi: number } | null, terms: Terms, settings: FindSettings): boolean {
-  const request = buildRequest(state, settings, target, old.originId, terms, SEARCH_BUDGET, range);
+  const request = buildRequest(state, settings, target, old.originId, terms, budgetFor(settings), range);
   if (typeof request === 'string') { notify('warn', request); return false; }
   handles.get(old.id)?.stop();
   handles.delete(old.id);
@@ -985,7 +996,8 @@ function launchCheck(base: CheckRun, isNew: boolean): boolean {
     findText: queryTextOf(run),
   }));
 
-  const budget = { maxResults: 3, timeLimitMs: base.settings.maxCount === null ? 3000 : 1500 };
+  // A row keeps its best 3 matches; sums collect a few more first so the search mode can choose among them.
+  const budget = { maxResults: base.settings.maxCount === 1 ? CHECK_KEEP : 12, timeLimitMs: base.settings.maxCount === null ? 3000 : 1500 };
   for (const a of nonZero) {
     const request = buildRequest(state, base.settings, a.value, a.id, base.terms, budget);
     if (typeof request === 'string') { onCheckRow(run.id, a.id, []); continue; }
@@ -998,8 +1010,14 @@ function launchCheck(base: CheckRun, isNew: boolean): boolean {
   return true;
 }
 
-function onCheckRow(runId: string, amountId: string, matches: Match[]) {
+const CHECK_KEEP = 3;
+
+function onCheckRow(runId: string, amountId: string, found: Match[]) {
   handles.delete(`${runId}:${amountId}`);
+  const run = state.runs.find(r => r.id === runId);
+  const matches = run && found.length > 1
+    ? sortMatches(found, 'best', run.terms, id => itemInfo(state, id), modeOf(run.settings)).slice(0, CHECK_KEEP)
+    : found.slice(0, CHECK_KEEP);
   const best = matches[0];
   const status: RowStatus = !best ? 'notfound' : best.items.length === 1 ? 'found' : 'combo';
   set(s => ({
@@ -1051,7 +1069,7 @@ export function rerunRun(id: string) {
   if (!r) return;
   stopRun(id);
   if (r.kind === 'check') { launchCheck({ ...r, viewing: null }, false); return; }
-  const request = buildRequest(state, r.settings, r.target, r.originId, r.terms, SEARCH_BUDGET, r.range);
+  const request = buildRequest(state, r.settings, r.target, r.originId, r.terms, budgetFor(r.settings), r.range);
   if (typeof request === 'string') { notify('warn', request); return; }
   patchRun(id, () => ({ status: 'running', reason: null, matches: [], progress: 0, startedAt: performance.now(), at: Date.now(), viewing: null }));
   set({ selectedRunId: id, previewId: null, view: 'find' });

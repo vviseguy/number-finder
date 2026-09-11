@@ -117,6 +117,14 @@ export function locationShort(a: Amount): string {
   return `${l.sheet}!${l.cell}`;
 }
 
+/** For headings: "Page 2 of 3", "Sheet Interest · cell D9", "Row 5" (CSV). */
+export function locationLong(a: Amount, pageCount?: number): string {
+  const l = a.location;
+  if (l.kind === 'pdf') return pageCount && pageCount > 1 ? `Page ${l.page} of ${pageCount}` : `Page ${l.page}`;
+  if (l.sheet === 'CSV') return `Row ${l.cell.replace(/^[A-Z]+/, '')}`;
+  return `Sheet ${l.sheet} · cell ${l.cell}`;
+}
+
 /** "18.00 less than 9,120" */
 export function diffPhrase(diff: number, target: number, targetDecimals: number): string {
   if (Math.abs(diff) < 0.005) return `same as ${formatMoney(target, targetDecimals)}`;

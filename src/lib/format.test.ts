@@ -60,6 +60,15 @@ test('madeOf and negatives labels cover exactly, between, at least, and a cap on
   expect(negativesLabel(true, 2)).toBe('up to 2 negatives');
 });
 
+test('locationLong reads well as a heading', async () => {
+  const { locationLong } = await import('./format');
+  const at = (location: Amount['location']) => ({ id: 'f:0', fileId: 'f', value: 1, text: '1', label: '', decimals: 0, location }) as Amount;
+  expect(locationLong(at({ kind: 'pdf', page: 2, box: [0, 0, 1, 1] }), 3)).toBe('Page 2 of 3');
+  expect(locationLong(at({ kind: 'pdf', page: 1, box: [0, 0, 1, 1] }), 1)).toBe('Page 1');
+  expect(locationLong(at({ kind: 'sheet', sheet: 'Interest', cell: 'D9' }))).toBe('Sheet Interest · cell D9');
+  expect(locationLong(at({ kind: 'sheet', sheet: 'CSV', cell: 'B5' }))).toBe('Row 5');
+});
+
 test('formatMoney uses a true minus and respects whole dollars', () => {
   expect(formatMoney(3234.56)).toBe('3,234.56');
   expect(formatMoney(3235, 0)).toBe('3,235');

@@ -3,6 +3,7 @@ import { IconSearch, IconX } from '@tabler/icons-react';
 import { addFiles, ALL_FILES, clearFindText, groupById, groupByText, groupName, loadSetupFile, setFind, setFindText, submitFind, useAppState } from '../state/store';
 import { MADE_OF_HINT, MAX_SUM_SIZE, MIN_SUM_SIZE, ROUNDING_LABEL, ROUNDING_SHORT } from '../lib/format';
 import { checkToken, foldPlusMinus, parseQuery, termsSentence } from '../lib/query';
+import { GROUPING_HINT, GROUPING_LABEL, GROUPING_SHORT, GROUPINGS, groupingOf, type Grouping } from '../lib/rank';
 import type { Rounding } from '../types';
 import { Pick } from './Pick';
 
@@ -27,6 +28,7 @@ function hints(groups: string[]): string[] {
     '3,200..3,300  ·  every number in a range',
     '3,235 sums:3  ·  sums of up to 3 numbers',
     '3,235 sums:=3  ·  sums of exactly 3 numbers',
+    '3,235 sums:3 mode:clumped  ·  sums of numbers next to each other',
     '3,235 ±0.50  ·  within 50 cents (type +-)',
     '3,235 neg  ·  let numbers count as negative',
     '3,235 neg:1  ·  at most one number counted as negative',
@@ -166,10 +168,10 @@ export function FindBar() {
             value={matchMode}
             label="Match"
             options={[
-              { value: '1', label: '1 number' },
-              { value: 'upto', label: 'Sums of up to' },
-              { value: 'exact', label: 'Sums of exactly' },
-              { value: 'any', label: 'Any sum' },
+              { value: '1', label: 'to number' },
+              { value: 'any', label: 'to sum (Any count)', short: 'to sum · any count' },
+              { value: 'upto', label: 'to sum (Up to count)', short: 'to sum · up to' },
+              { value: 'exact', label: 'to sum (Specify count)', short: 'to sum · exactly' },
             ]}
             onChange={v => setMatch(v, sumSize)}
           >
@@ -184,6 +186,17 @@ export function FindBar() {
             )}
           </Pick>
         </span>
+        {f.maxCount !== 1 && (
+          <span className="opt" title={GROUPING_HINT}>
+            <span className="opt-name">Search mode</span>
+            <Pick
+              value={groupingOf(f)}
+              label="Search mode"
+              options={GROUPINGS.map(g => ({ value: g, label: GROUPING_LABEL[g], short: GROUPING_SHORT[g] }))}
+              onChange={v => setFind({ grouping: v as Grouping })}
+            />
+          </span>
+        )}
         <span className="opt" title="How close a match has to be">
           <span className="opt-name">Rounding</span>
           <Pick

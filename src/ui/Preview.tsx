@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { IconChevronLeft, IconChevronRight, IconEye } from '@tabler/icons-react';
+import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import * as XLSX from 'xlsx';
 import type { PageViewport } from 'pdfjs-dist';
 import { amountIndex, fileData, fileLabel, searchForAmount, useAppState, type FileEntry } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
-import { locationShort } from '../lib/format';
+import { locationLong } from '../lib/format';
 import { loadPdf } from '../lib/pdf';
 import type { Amount } from '../types';
+import { FileIcon } from './common';
 import { ScrollRail } from './ScrollRail';
 
 interface PreviewProps {
@@ -27,9 +28,15 @@ export function Preview({ amountId, navIds = [], navNoun = 'Match', onNavigate }
 
   return (
     <div className="preview" aria-label={`Preview of ${file.name}`}>
+      {/* FILE NAME, big and bold; where in it, underneath. */}
       <div className="preview-head">
-        <IconEye size={14} aria-hidden />
-        <b title={file.name}>{fileLabel(file)}</b> · {locationShort(amount)}
+        <FileIcon kind={file.parsed?.kind} size={22} />
+        <div className="preview-title">
+          <span className="preview-name" title={file.name}>{fileLabel(file)}</span>
+          <span className="preview-where" title={`${locationLong(amount, file.parsed?.pageCount)}${amount.label ? ` · ${amount.label}` : ''}`}>
+            {locationLong(amount, file.parsed?.pageCount)}{amount.label && <span className="muted"> · {amount.label}</span>}
+          </span>
+        </div>
         {navIds.length > 1 && i >= 0 && onNavigate && (
           <span className="push nav">
             <button type="button" className="icon-btn" aria-label={`Previous ${navNoun.toLowerCase()}`} disabled={i === 0} onClick={() => onNavigate(navIds[i - 1])}><IconChevronLeft size={14} /></button>

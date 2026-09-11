@@ -69,6 +69,14 @@ describe('parseQuery', () => {
     expect(parseQuery('3,235 negatives:off').negatives).toBe(false);
     expect(parseQuery('3,235').maxCount).toBeUndefined();
   });
+  test('mode: sets the search mode for sums', () => {
+    expect(parseQuery('3,235 mode:clumped').grouping).toBe('clumped');
+    expect(parseQuery('3,235 mode:clump').grouping).toBe('clumped');
+    expect(parseQuery('3,235 mode:spread').grouping).toBe('spread');
+    expect(parseQuery('3,235 mode:across').grouping).toBe('across');
+    expect(parseQuery('3,235').grouping).toBeUndefined();
+    expect(parseQuery('3,235 mode:wild').errors[0]).toContain('mode:clumped');
+  });
   test('sums of exactly, between, and at least; at most N negatives', () => {
     expect(parseQuery('3,235 sums:=3')).toMatchObject({ maxCount: 3, minCount: 3 });
     expect(parseQuery('3,235 sums:=1')).toMatchObject({ maxCount: 1, minCount: undefined });
