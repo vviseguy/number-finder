@@ -117,6 +117,8 @@ export interface AppState {
   find: FindSettings;
   /** What's typed in the search bar. */
   findText: string;
+  /** Bumped whenever the bar should take focus (new search). */
+  barFocus: number;
   /** Whole-group mode: the group whose every number is looked up; null = one number. */
   scopeGroupId: string | null;
   runs: Run[];
@@ -209,7 +211,7 @@ function loadSetup(): AppState {
   const theme = loadTheme();
   applyTheme(theme);
   const base: AppState = {
-    view: 'files', theme, paneWidth: loadPaneWidth(), files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', scopeGroupId: null,
+    view: 'files', theme, paneWidth: loadPaneWidth(), files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', barFocus: 0, scopeGroupId: null,
     runs: [], selectedRunId: null, previewId: null, notice: null, dragging: false,
   };
   try {
@@ -482,6 +484,11 @@ export function setFindText(findText: string) { set({ findText }); }
 export function setScope(scopeGroupId: string | null) { set({ scopeGroupId }); }
 export function clearFindText() { set({ findText: '' }); }
 
+/** An empty bar on the Find view: the history (or a prompt to add files) with nothing selected. */
+export function newSearch() {
+  set(s => ({ findText: '', scopeGroupId: null, selectedRunId: null, previewId: null, view: 'find', barFocus: s.barFocus + 1 }));
+}
+
 function currentSettings(): FindSettings {
   const g = state.find.groupId;
   const { tolerance: _drop, ...rest } = state.find;
@@ -524,6 +531,7 @@ const checkFor = (checkGroupId: string) => state.runs.find((r): r is CheckRun =>
 export function submitFind(): boolean {
   const q = parseQuery(state.findText);
   if (q.errors.length) { notify('error', q.errors[0]); return false; }
+  if (!state.findText.trim() && !state.scopeGroupId) { newSearch(); return true; }
   const settings = currentSettings();
   if (q.inGroup !== null) {
     const id = groupByText(state, q.inGroup);
@@ -554,7 +562,7 @@ export function submitFind(): boolean {
     targets.push({ value: (q.range.lo + q.range.hi) / 2, decimals, range: q.range, text: q.range.text });
   }
   if (!targets.length) {
-    notify('error', 'Type a number to find, like 3,235, or a range like 3,200..3,300.');
+    notify('error', 'Type a number to find, like 3,235, or a range like 3,200..3,300. Filter words on their own need a number.');
     return false;
   }
 

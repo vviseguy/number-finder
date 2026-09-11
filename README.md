@@ -47,7 +47,9 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
 
    The pane on the right shows the selected number in its file. Hover any number, in the results or in a file, to light up every other place the same value appears; the yellow marks along the scrollbars show where those places are.
 
-   **Sums** show on one line as an equation, `W-2 85,000.00 + INT 3,234.56 + DIV 2,000.00 = 90,234.56`, and open into the full breakdown. A number counted as negative is written `−(265.44)`, with the grey minus and parentheses around the number as it appears in the file.
+   **Sums** show closed: a title (*Sum of 3 amounts across W-2.pdf, 1099-INT.pdf and 1 other file*) with the equation along the bottom, `85,000.00 + 3,234.56 + 2,000.00 = 90,234.56`, trimmed to `…` if it's long so the total always shows. Open one for the full breakdown. A number counted as negative is written `−(265.44)`, with the grey minus and parentheses around the number as it appears in the file.
+
+   **New search.** Click the title or step 3 (or press Search with the bar empty) to clear the bar: the history stays, and with no files loaded you get a prompt to add some.
 
 **What counts as a number:** amounts like `85,000.00`, `$3,234.56`, `(265.44)`, `3,235`. Years, box and line labels (`1`, `2a`, `25a`), form names (`Form 1040`), SSNs, EINs, ZIP codes, dates, percentages, and long account numbers are skipped. Open a file's preview to see exactly which numbers were picked up — each one is clickable.
 

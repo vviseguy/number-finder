@@ -137,16 +137,49 @@ test('sums show as an equation that opens into the full breakdown, with −( ) f
   await find(page, '3,234.56');
   const combo = page.locator('.combo').first();
   const head = combo.locator('.combo-head');
-  await expect(head).toContainText('Made of 2');
-  await expect(head).toContainText('3,500.00');
-  await expect(head).toContainText('= 3,234.56');
+  await expect(head.locator('.combo-title')).toHaveText('Sum of 2 amounts in workpapers.xlsx · 1 counted as negative');
+  await expect(head.locator('.eq-terms')).toContainText('3,500.00');
+  await expect(head.locator('.eq-total')).toHaveText('= 3,234.56');
   await expect(head.locator('.neg')).toHaveCount(2); // "−(" and ")"
-  await expect(combo.locator('.result-row')).toHaveCount(0); // concise until opened
+  await expect(head.locator('.chev')).toBeVisible();
+  await expect(combo.locator('.result-row')).toHaveCount(0); // stays closed until opened
+
+  // Picking a number inside a closed sum marks the sum instead of opening it.
+  await page.locator('.side-pane .cell-btn', { hasText: '265.44' }).first().click(); // starts a search for 265.44
+  await page.locator('.search-row', { hasText: '3,234.56' }).locator('.search-main').click();
+  await expect(combo.locator('.result-row')).toHaveCount(0);
+
   await head.click();
   await expect(combo.locator('.result-row')).toHaveCount(2);
   await expect(combo.locator('.result-row.nested .flipped')).toContainText('265.44');
-  await expect(combo).toContainText('counted as negative');
   await page.screenshot({ path: path.join(SHOTS, '04-sums.png') });
+});
+
+test('the title and step 3 start a new search; an empty bar shows the history or a prompt', async ({ page }) => {
+  await page.goto(APP);
+  await tab(page, 'Find').click();
+  await expect(page.locator('.add-files-prompt')).toBeVisible();
+  await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
+  await tab(page, 'Files').click(); // the file list (and its "Reading…" state) lives on the Files view
+  await expect(page.locator('.file-row', { hasText: 'W-2.pdf' })).toBeVisible();
+  await expect(page.getByText('Reading…')).toHaveCount(0);
+  await tab(page, 'Find').click();
+  await expect(page.locator('.add-files-prompt')).toHaveCount(0);
+  await expect(page.locator('.main-empty')).toContainText('Type a number');
+  await find(page, '85,000');
+  await expect(page.locator('.results')).toBeVisible();
+  await page.locator('.brand').click();
+  await expect(page.locator('#find-input')).toHaveValue('');
+  await expect(page.locator('#find-input')).toBeFocused();
+  await expect(page.locator('.results')).toHaveCount(0);
+  await expect(page.locator('.search-row')).toHaveCount(1);
+  await expect(page.locator('.main-empty')).toContainText('Pick a search from the history');
+  await page.locator('.search-row .search-main').first().click();
+  await expect(page.locator('.results')).toBeVisible();
+  await page.locator('#find-input').fill('');
+  await page.locator('#find-input').press('Enter');
+  await expect(page.locator('.results')).toHaveCount(0);
+  await expect(page.locator('.notice')).toHaveCount(0);
 });
 
 test('not found shows the likely typo: 9,120 withheld vs W-2 box 2 9,102.00', async ({ page }) => {

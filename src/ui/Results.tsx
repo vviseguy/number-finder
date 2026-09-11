@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { IconArrowsExchange, IconChevronDown, IconHistory, IconSearch } from '@tabler/icons-react';
+import { IconArrowsExchange, IconChevronDown, IconHistory, IconSearch, IconUpload } from '@tabler/icons-react';
+import { chooseFiles } from './FindBar';
 import {
   amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, showPreview, shownRun, targetText, useAppState, viewVersion,
   type Run, type SearchRun,
@@ -11,7 +12,7 @@ import { passesTerms, termsPhrase } from '../lib/query';
 import type { Match, MatchItem } from '../types';
 import { arrowNav } from './common';
 import { CheckResults } from './CheckResults';
-import { Equation } from './Equation';
+import { Equation, sumTitle } from './Equation';
 import { formatTime } from './checkParts';
 import { Money } from './Money';
 import { NearButton } from './NearButton';
@@ -21,9 +22,21 @@ export function Results() {
   const s = useAppState();
   const live = s.runs.find(r => r.id === s.selectedRunId);
   if (!live) {
-    return s.files.length ? (
-      <p className="empty-note main-empty">Type a number in the bar above and press Enter, or open a file and click one of its numbers.</p>
-    ) : null;
+    if (!s.files.length) {
+      return (
+        <div className="card add-files-prompt">
+          <IconUpload size={26} stroke={1.5} aria-hidden />
+          <p><b>Add your tax documents to start.</b></p>
+          <p className="muted">Drop PDFs, Excel workbooks, or CSV files anywhere on this page. They're read inside the page and never uploaded.</p>
+          <button type="button" className="btn" onClick={chooseFiles}>Choose files</button>
+        </div>
+      );
+    }
+    return (
+      <p className="empty-note main-empty">
+        {s.runs.length ? 'Pick a search from the history, or type a number in the bar above.' : 'Type a number in the bar above and press Enter, or open a file and click one of its numbers.'}
+      </p>
+    );
   }
   const { run, past } = shownRun(live);
   return (
@@ -83,18 +96,19 @@ function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean
   );
 }
 
+/** A sum: a title line, the equation along the bottom (trimmed to … with the total always visible), and the rows when opened. */
 function MatchRows({ match, run, previewId }: { match: Match; run: SearchRun; previewId: string | null }) {
   const [open, setOpen] = useState(false);
   if (match.items.length === 1) return <ItemRow item={match.items[0]} match={match} run={run} previewId={previewId} />;
-  const expanded = open || match.items.some(it => it.id === previewId);
+  const holdsSelected = match.items.some(it => it.id === previewId);
   return (
-    <div className={`combo${expanded ? ' open' : ''}`}>
-      <button type="button" className="combo-head" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>
-        <span className="combo-n">Made of {match.items.length}</span>
-        <Equation match={match} />
-        <IconChevronDown size={14} className="chev" aria-hidden />
+    <div className={`combo${open ? ' open' : ''}${holdsSelected ? ' has-selected' : ''}`}>
+      <button type="button" className="combo-head" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <span className="combo-title" title={sumTitle(match)}>{sumTitle(match)}</span>
+        <IconChevronDown size={16} className="chev" aria-hidden />
+        <Equation match={match} withFiles={false} layout="row" />
       </button>
-      {expanded && match.items.map(it => <ItemRow key={it.id} item={it} run={run} previewId={previewId} nested />)}
+      {open && match.items.map(it => <ItemRow key={it.id} item={it} run={run} previewId={previewId} nested />)}
     </div>
   );
 }

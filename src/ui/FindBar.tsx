@@ -45,6 +45,9 @@ export function FindBar() {
       ? `Whole-group mode looks up every number in ${scope?.name ?? 'the group'}; the words here are filters. Switch to One number to search for ${q.numbers[0]?.text ?? q.range?.text}.`
       : [q.numbers.length > 1 ? `${q.numbers.length} numbers: each is its own search.` : '', termsSentence(q.terms)].filter(Boolean).join(' '));
 
+  // A new search (title or step 3 clicked, or Search on an empty bar) puts the cursor in the bar.
+  useEffect(() => { if (s.barFocus) input.current?.focus(); }, [s.barFocus]);
+
   // Rotate the hints while the bar is empty and not being typed in.
   useEffect(() => {
     if (s.findText || focused) return;

@@ -77,7 +77,8 @@ kbd {
   border-bottom: 1px solid var(--line);
   z-index: 5;
 }
-.brand { display: flex; align-items: center; gap: 8px; }
+.brand { display: flex; align-items: center; gap: 8px; border: none; background: none; padding: 2px 6px 2px 2px; margin-left: -2px; border-radius: var(--radius-sm); cursor: pointer; text-align: left; }
+.brand:hover { background: var(--sunken); }
 .topbar h1 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -0.01em; line-height: 1.2; }
 .brand-sub { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ok); font-weight: 550; line-height: 1.2; cursor: help; }
 .brand-icon { color: var(--accent-text); }
@@ -357,15 +358,16 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .amount { text-align: right; font-weight: 600; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; }
 .amount .sub { font-weight: 400; font-size: 11.5px; color: var(--text-3); }
 .combo { border-top: 1px solid var(--line); }
+.combo.has-selected { box-shadow: inset 3px 0 0 var(--accent); }
 .combo-head {
-  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
-  border: none; background: none; cursor: pointer; padding: 9px 14px; font-size: 13.5px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 3px 12px; align-items: center;
+  width: 100%; text-align: left; border: none; background: none; cursor: pointer; padding: 8px 14px 9px; font-size: 13.5px;
 }
-.combo-head .equation { flex: 1; min-width: 0; }
 .combo-head:hover { background: var(--sunken); }
-.combo-n { flex: none; color: var(--text-3); font-size: 12px; font-weight: 600; }
-.combo-head .chev { margin-left: auto; flex: none; color: var(--text-3); transition: transform 0.15s; }
+.combo-title { grid-column: 1; grid-row: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
+.combo-head .chev { grid-column: 2; grid-row: 1 / 3; color: var(--text-3); transition: transform 0.15s; }
 .combo.open .combo-head .chev { transform: rotate(180deg); }
+.combo-head .equation.row { grid-column: 1; grid-row: 2; }
 .combo .result-row { border-top: 1px dashed var(--line); background: var(--sunken); }
 .combo .result-row.selected { background: var(--accent-soft); }
 .equation { display: inline; line-height: 1.7; }
@@ -373,6 +375,11 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .equation .op { color: var(--text-3); white-space: pre; }
 .equation .term-file { color: var(--text-2); font-weight: 500; }
 .equation .num { font-weight: 600; }
+.equation.row { display: flex; align-items: baseline; min-width: 0; line-height: 1.5; }
+.equation.row .eq-terms { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.equation.row .eq-total { flex: none; white-space: nowrap; }
+.add-files-prompt { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 28px 20px; max-width: 520px; color: var(--text-2); }
+.add-files-prompt .btn { margin-top: 4px; }
 
 .not-found { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--bad); border-radius: 0 var(--radius) var(--radius) 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
 .nearest {

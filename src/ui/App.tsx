@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { IconArrowRight, IconDeviceDesktop, IconFileSearch, IconLock, IconMoon, IconSun, IconUpload } from '@tabler/icons-react';
-import { addFiles, setDragging, setTheme, setView, useAppState, type Theme, type View } from '../state/store';
+import { addFiles, newSearch, setDragging, setTheme, setView, useAppState, type Theme, type View } from '../state/store';
 import { chooseFiles, FindBar } from './FindBar';
 import { FilesView } from './FilesView';
 import { GroupsView } from './GroupsView';
@@ -65,20 +65,26 @@ export function App() {
   return (
     <div className="shell" style={{ ['--pane' as string]: `${s.paneWidth}px` }}>
       <header className="topbar">
-        <div className="brand">
+        <button type="button" className="brand" title="New search" onClick={newSearch}>
           <IconFileSearch className="brand-icon" size={22} stroke={1.75} aria-hidden />
-          <div>
+          <span>
             <h1>Number finder</h1>
-            <p className="brand-sub" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
+            <span className="brand-sub" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
               <IconLock size={11} stroke={2} aria-hidden /> Files stay on this computer
-            </p>
-          </div>
-        </div>
+            </span>
+          </span>
+        </button>
         <nav className="steps" aria-label="Steps">
           {steps.map((st, i) => (
             <span key={st.view} className="step-wrap">
               {i > 0 && <IconArrowRight size={15} stroke={1.75} className="step-arrow" aria-hidden />}
-              <button type="button" className={`step-tab${s.view === st.view ? ' on' : ''}`} aria-current={s.view === st.view ? 'page' : undefined} onClick={() => setView(st.view)}>
+              <button
+                type="button"
+                className={`step-tab${s.view === st.view ? ' on' : ''}`}
+                aria-current={s.view === st.view ? 'page' : undefined}
+                title={st.view === 'find' ? 'New search' : undefined}
+                onClick={() => (st.view === 'find' ? newSearch() : setView(st.view))}
+              >
                 <span className="step">{st.n}</span> {st.label}
                 {st.count && <span className="count">{st.count}</span>}
               </button>
