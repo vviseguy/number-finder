@@ -19,15 +19,19 @@ import { SearchPool } from '../engine/pool';
 import { forgetPdf, getPdfjs } from '../lib/pdf';
 import { formatMoney, madeOfLabel, parseLimit, ROUNDING_SHORT, uid } from '../lib/format';
 import { hasTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, type Terms } from '../lib/query';
+import { shortNames } from '../lib/names';
 
+// These are read while this module loads (loadSetup below), so they must be declared before that line.
 export const ALL_FILES = '__all__';
 const STORAGE_KEY = 'number-finder:setup:v3';
+const THEME_KEY = 'number-finder:theme';
 const GROUP_COLORS = 6;
 const READ_TIMEOUT_MS = 60_000;
 
 // ---------- state shape ----------
 
 export type View = 'files' | 'groups' | 'find';
+export type Theme = 'system' | 'light' | 'dark';
 
 export interface FileEntry {
   id: string;
@@ -97,6 +101,7 @@ export interface Notice { kind: 'info' | 'warn' | 'error'; text: string; action?
 
 export interface AppState {
   view: View;
+  theme: Theme;
   files: FileEntry[];
   /** Nicknames by file key, kept for files that aren't loaded right now. */
   nicks: Record<string, string>;
@@ -137,7 +142,9 @@ function emit() {
 }
 
 function set(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
+  const prev = state;
   state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
+  if (state.files !== prev.files) refreshLabels();
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => { persistTimer = undefined; saveSetup(); }, 300);
   emit();
@@ -172,9 +179,27 @@ function restoreRun(r: SavedRun): Run {
     : { ...base, kind: 'search', id: uid('s'), target: r.target, targetDecimals: r.targetDecimals, originId: null, reason: null, matches: [], progress: null };
 }
 
+function loadTheme(): Theme {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return t === 'light' || t === 'dark' ? t : 'system';
+  } catch (err) {
+    console.warn('Theme not restored', err);
+    return 'system';
+  }
+}
+
+function applyTheme(theme: Theme) {
+  if (typeof document === 'undefined') return;
+  if (theme === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+}
+
 function loadSetup(): AppState {
+  const theme = loadTheme();
+  applyTheme(theme);
   const base: AppState = {
-    view: 'files', files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', scopeGroupId: null, editingRunId: null,
+    view: 'files', theme, files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', scopeGroupId: null, editingRunId: null,
     runs: [], selectedRunId: null, previewId: null, notice: null, dragging: false,
   };
   try {
@@ -228,8 +253,15 @@ export function amountIndex(s: AppState = state): Map<string, { amount: Amount; 
   return indexCache.map;
 }
 
-/** The short name shown in the interface. */
-export const fileLabel = (f: { nick: string; name: string }) => f.nick || f.name;
+/**
+ * The name shown in the interface: the nickname if one is set, otherwise the file name shortened to what
+ * tells it apart from the other files (see lib/names.ts). Full names are always in tooltips and exports.
+ */
+let labels = new Map<string, string>();
+function refreshLabels() {
+  labels = shortNames(state.files.map(f => f.name));
+}
+export const fileLabel = (f: { nick: string; name: string }) => f.nick || labels.get(f.name) || f.name;
 
 export function groupById(s: AppState, id: string | null): Group | undefined {
   return id ? s.groups.find(g => g.id === id) : undefined;
@@ -285,6 +317,12 @@ export function notify(kind: Notice['kind'], text: string, action?: Notice['acti
 export function dismissNotice() { clearTimeout(noticeTimer); set({ notice: null }); }
 
 export function setView(view: View) { set({ view }); }
+
+export function setTheme(theme: Theme) {
+  applyTheme(theme);
+  try { if (theme === 'system') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, theme); } catch { /* not remembered */ }
+  set({ theme });
+}
 
 // ---------- files ----------
 
@@ -415,55 +453,90 @@ function currentSettings(): FindSettings {
   return { ...state.find, groupId: g === ALL_FILES || groupById(state, g) ? g : ALL_FILES };
 }
 
-/** Load a run back into the box; the next Find or Check replaces it and keeps the old version. */
+/** What the search bar shows for a run: its number(s) and filter words. */
+function queryTextOf(r: Run): string {
+  const number = r.kind === 'search' ? formatMoney(r.target, r.targetDecimals).replace('−', '-') : '';
+  return [number, serializeTerms(r.terms)].filter(Boolean).join(' ');
+}
+
+/** Put a run's query and settings into the search bar (selecting it does this, like an address bar). */
+function loadIntoBar(r: Run) {
+  set({ find: r.settings, findText: queryTextOf(r), scopeGroupId: r.kind === 'check' ? r.checkGroupId : null });
+}
+
+/** Load a run back into the bar for editing; the next Find or Check replaces it and keeps the old version. */
 export function editRun(id: string) {
   const r = state.runs.find(x => x.id === id);
   if (!r) return;
-  const number = r.kind === 'search' ? formatMoney(r.target, r.targetDecimals).replace('−', '-') : '';
-  const terms = serializeTerms(r.terms);
-  set({
-    editingRunId: id,
-    view: 'find',
-    selectedRunId: id,
-    find: r.settings,
-    findText: [number, terms].filter(Boolean).join(' '),
-    scopeGroupId: r.kind === 'check' ? r.checkGroupId : null,
-  });
+  loadIntoBar(r);
+  set({ editingRunId: id, view: 'find', selectedRunId: id });
 }
 
-export function cancelEdit() { set({ editingRunId: null, findText: '', scopeGroupId: null }); }
+export function cancelEdit() { set({ editingRunId: null }); }
 
-/** Enter in the find box: search for the typed number, or check every number in the picked group. */
+export function clearFindText() { set({ findText: '', editingRunId: null }); }
+
+const sameTerms = (a: Terms, b: Terms) =>
+  a.include.length === b.include.length && a.exclude.length === b.exclude.length
+  && a.include.every(w => b.include.includes(w)) && a.exclude.every(w => b.exclude.includes(w));
+const sameSettings = (a: FindSettings, b: FindSettings) =>
+  a.groupId === b.groupId && a.maxCount === b.maxCount && a.rounding === b.rounding && a.allowFlips === b.allowFlips;
+
+/** A run already in the list with exactly this definition, if any. */
+function existingRun(def: { kind: 'search'; target: number } | { kind: 'check'; checkGroupId: string }, terms: Terms, settings: FindSettings): Run | undefined {
+  return state.runs.find(r => r.kind === def.kind && sameTerms(r.terms, terms) && sameSettings(r.settings, settings)
+    && (r.kind === 'search' ? Math.abs(r.target - (def as { target: number }).target) < 0.005 : r.checkGroupId === (def as { checkGroupId: string }).checkGroupId));
+}
+
+/**
+ * Enter in the search bar. Each number typed starts its own search (they share the filters and settings);
+ * with "every number in <group>" picked, the bar's words are filters for a check. A query that repeats a
+ * search already in the list just shows that one again. In edit mode the (first) result replaces the run
+ * being edited. The query stays in the bar afterwards.
+ */
 export function submitFind(): boolean {
   const q = parseQuery(state.findText);
-  if (q.extraNumbers.length) {
-    notify('error', 'Search for one number at a time. To look up many numbers, pick a group with Check a group.');
-    return false;
-  }
   const settings = currentSettings();
   const editing = state.runs.find(r => r.id === state.editingRunId) ?? null;
+
   if (state.scopeGroupId) {
     if (q.value !== null) {
-      notify('warn', `A group is picked, so the box only takes filters. Remove the group to search for ${q.valueText}.`);
+      notify('warn', `"Every number in ${groupName(state, state.scopeGroupId)}" is picked, so the bar only takes filter words. Choose "a number" to search for ${q.valueText}.`);
       return false;
     }
+    const dup = editing ? undefined : existingRun({ kind: 'check', checkGroupId: state.scopeGroupId }, q.terms, settings);
+    if (dup && dup.status !== 'idle') { selectRun(dup.id); notify('info', 'That check is already in the list; showing it.'); return true; }
+    if (dup) { rerunRun(dup.id); return true; }
     const ok = editing?.kind === 'check'
       ? replaceCheck(editing, state.scopeGroupId, settings, q.terms)
       : startCheck(state.scopeGroupId, settings, q.terms);
     if (ok) set({ editingRunId: null });
     return ok;
   }
-  if (q.value === null) {
-    notify('error', 'Type a number to find, like 3,235, or use Check a group to look up every number in a group.');
+
+  const targets = q.value === null ? [] : [{ value: q.value, text: q.valueText }, ...q.extraNumbers.map(t => ({ value: parseQuery(t).value!, text: t }))];
+  if (!targets.length) {
+    notify('error', 'Type a number to find, like 3,235. To look up every number in a group, pick the group under Find.');
     return false;
   }
-  const ok = editing?.kind === 'search'
-    ? replaceSearch(editing, q.value, q.decimals, q.terms, settings)
-    : runSearch(q.value, q.decimals, q.terms, null, settings);
-  // Filters stay in the box for the next number.
-  if (ok) { const rest = serializeTerms(q.terms); set({ findText: rest ? `${rest} ` : '', editingRunId: null }); }
-  return ok;
+  let firstId: string | null = null;
+  let started = 0;
+  targets.forEach((t, i) => {
+    const decimals = decimalsOfText(t.text);
+    const dup = editing ? undefined : existingRun({ kind: 'search', target: t.value }, q.terms, settings);
+    if (dup && dup.status !== 'idle') { firstId ??= dup.id; if (targets.length === 1) notify('info', 'That search is already in the list; showing it.'); return; }
+    if (dup) { rerunRun(dup.id); firstId ??= dup.id; started++; return; }
+    const ok = i === 0 && editing?.kind === 'search'
+      ? replaceSearch(editing, t.value, decimals, q.terms, settings)
+      : runSearch(t.value, decimals, q.terms, null, settings);
+    if (ok) { started++; firstId ??= i === 0 && editing?.kind === 'search' ? editing.id : state.runs[0].id; }
+  });
+  if (firstId) set({ selectedRunId: firstId, editingRunId: null });
+  if (targets.length > 1 && started) notify('info', `Started ${started} searches, one per number.`);
+  return !!firstId;
 }
+
+const decimalsOfText = (t: string) => { const m = /\.(\d+)/.exec(t); return m ? m[1].length : 0; };
 
 function buildRequest(
   s: AppState,
@@ -521,7 +594,7 @@ export function runSearch(target: number, decimals: number, terms: Terms, origin
     kind: 'search', id: uid('s'), target, targetDecimals: decimals, originId, settings, terms, status: 'running', reason: null,
     matches: [], progress: 0, startedAt: performance.now(), elapsedMs: 0, version: 1, history: [], viewing: null,
   };
-  set(s => ({ runs: [run, ...s.runs], selectedRunId: run.id, previewId: null, view: 'find' }));
+  set(s => ({ runs: [run, ...s.runs], selectedRunId: run.id, previewId: null, view: 'find', findText: queryTextOf(run), find: settings, scopeGroupId: null }));
   startSearch(run.id, request);
   return true;
 }
@@ -724,11 +797,14 @@ export function restoreVersion(id: string, index: number) {
   else if (r.kind === 'check' && v.kind === 'check') replaceCheck(r, v.checkGroupId, v.settings, v.terms);
 }
 
+/** Show a run's results and put its query back into the search bar. */
 export function selectRun(id: string) {
   const r = state.runs.find(x => x.id === id);
-  const shown = r ? shownRun(r).run : undefined;
-  const previewId = !shown ? null : shown.kind === 'search' ? shown.matches[0]?.items[0].id ?? null : shown.selectedAmountId ?? shown.rows[0]?.amountId ?? null;
-  set({ selectedRunId: id, previewId });
+  if (!r) return;
+  const shown = shownRun(r).run;
+  const previewId = shown.kind === 'search' ? shown.matches[0]?.items[0].id ?? null : shown.selectedAmountId ?? shown.rows[0]?.amountId ?? null;
+  loadIntoBar(r);
+  set({ selectedRunId: id, previewId, editingRunId: null });
 }
 
 export function showPreview(amountId: string | null) { set({ previewId: amountId }); }

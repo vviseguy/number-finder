@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { IconFileSearch, IconLock, IconUpload } from '@tabler/icons-react';
-import { addFiles, setDragging, setView, useAppState, type View } from '../state/store';
-import { FindBar } from './FindBar';
+import { IconArrowRight, IconDeviceDesktop, IconFileSearch, IconLock, IconMoon, IconSun, IconUpload } from '@tabler/icons-react';
+import { addFiles, setDragging, setTheme, setView, useAppState, type Theme, type View } from '../state/store';
+import { chooseFiles, FindBar } from './FindBar';
 import { FilesView } from './FilesView';
 import { GroupsView } from './GroupsView';
 import { RunList } from './RunList';
@@ -9,6 +9,25 @@ import { Results } from './Results';
 import { SidePane } from './SidePane';
 import { NoticeBar } from './NoticeBar';
 import { ScrollRail } from './ScrollRail';
+
+const THEME_NEXT: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' };
+const THEME_LABEL: Record<Theme, string> = { system: 'Theme: follows your system', light: 'Theme: light', dark: 'Theme: dark' };
+
+/** Cycles system → light → dark. */
+function ThemeToggle({ theme }: { theme: Theme }) {
+  const Icon = theme === 'light' ? IconSun : theme === 'dark' ? IconMoon : IconDeviceDesktop;
+  return (
+    <button
+      type="button"
+      className="icon-btn theme-toggle"
+      aria-label={`${THEME_LABEL[theme]}. Switch to ${THEME_NEXT[theme] === 'system' ? 'system' : THEME_NEXT[theme]}`}
+      title={`${THEME_LABEL[theme]} · click for ${THEME_NEXT[theme]}`}
+      onClick={() => setTheme(THEME_NEXT[theme])}
+    >
+      <Icon size={17} stroke={1.75} />
+    </button>
+  );
+}
 
 export function App() {
   const s = useAppState();
@@ -48,16 +67,24 @@ export function App() {
         <IconFileSearch className="brand-icon" size={20} stroke={1.75} aria-hidden />
         <h1>Number finder</h1>
         <nav className="steps" aria-label="Steps">
-          {steps.map(st => (
-            <button key={st.view} type="button" className={`step-tab${s.view === st.view ? ' on' : ''}`} aria-current={s.view === st.view ? 'page' : undefined} onClick={() => setView(st.view)}>
-              <span className="step">{st.n}</span> {st.label}
-              {st.count && <span className="count">{st.count}</span>}
-            </button>
+          {steps.map((st, i) => (
+            <span key={st.view} className="step-wrap">
+              {i > 0 && <IconArrowRight size={15} stroke={1.75} className="step-arrow" aria-hidden />}
+              <button type="button" className={`step-tab${s.view === st.view ? ' on' : ''}`} aria-current={s.view === st.view ? 'page' : undefined} onClick={() => setView(st.view)}>
+                <span className="step">{st.n}</span> {st.label}
+                {st.count && <span className="count">{st.count}</span>}
+              </button>
+            </span>
           ))}
         </nav>
+        <span className="drop-chip">
+          <IconUpload size={14} stroke={1.75} aria-hidden />
+          <span>Drop files anywhere, or <button type="button" className="link" onClick={chooseFiles}>choose files</button></span>
+        </span>
         <span className="local-badge" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
           <IconLock size={14} stroke={2} aria-hidden /> Files stay on this computer
         </span>
+        <ThemeToggle theme={s.theme} />
       </header>
 
       <FindBar />

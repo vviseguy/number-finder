@@ -14,22 +14,22 @@ Double-click **`numberfinder.html`**. It opens in your browser and works offline
 
 Everything happens inside that browser tab. The page includes a security rule (a Content-Security-Policy) that stops it from making any network connection at all, so documents can't be sent anywhere — you can check the rule at the top of the HTML file.
 
-Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, and your searches — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
+Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, your searches, and the theme — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
 
 ## Using it
 
-The three steps in the header are the three views. The strip under the header, with the drop target and the find box, is on every view.
+The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three views. The drop target sits beside them, and the search bar under the header is on every view. The sun/moon button at the top right pins light or dark mode (it follows your system until you do).
 
-1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. The pencil gives a file a short name (say, *INT* for a long 1099 file name) that's used everywhere in the interface and remembered for next time. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
+1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. Long file names are shortened to what tells them apart: words that appear in every file's name are replaced by `…`, so *Alpha Client 2025 Bank Statement Jan.pdf* shows as `Alpha…Jan.pdf` next to its Beta and February siblings, with the full name underneath and in tooltips. The pencil sets your own short name instead, remembered for next time. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
-3. **Find a number.** Type it (or click any number in a preview), pick the group, and choose:
-   - **Match:** *1 number* (where does it appear?), *Sums of up to N* (set N from 2 to 20), or *Any sum*. Exact matches of the number itself always show first.
+3. **Find.** The search bar reads as a sentence: *Find* `a number` · `3,235` · *in* `All files`. Type a number (or click any number in a preview) and press Enter. Several numbers, like `3,235 85,000`, start several searches. The query stays in the bar; selecting a search in the list loads it back, and repeating a search just shows the existing one. Under the bar:
+   - **Match:** *1 number* (where does it appear?), *sums of up to N* (2 to 20), or *any sum*. Exact matches of the number itself always show first.
    - **Rounding:** *Whole dollars* (±0.50 — returns round to dollars, so 3,234.56 matches 3,235), *Within 1 cent*, or *Exact*.
-   - **Also try negatives:** any number may count as negative.
+   - **Negatives:** *also try negatives* lets any number count as negative.
 
-   **Filters.** Add words to the box the way you would in a search engine: `3,235 -hours` skips every number whose label, column, sheet, or file name mentions "hours"; `3,235 interest` searches only numbers that mention "interest"; quotes keep a phrase together (`-"hourly rate"`). Filters apply before the search, so a skipped number can never be part of a sum, and they stay in the box for your next number.
+   **Filters.** Add words the way you would in a search engine: `3,235 -hours` skips every number whose label, column, sheet, or file name mentions "hours"; `3,235 interest` searches only numbers that mention "interest"; quotes keep a phrase together (`-"hourly rate"`). Filters apply before the search, so a skipped number can never be part of a sum.
 
-   **Check a group.** Press *Check a group* in the box and pick a group: instead of one number, every number in that group is looked up in the group you're searching in, with the same Match, Rounding, and filter settings. The result is a table of what was found, what's made of several numbers, and what's missing.
+   **Check a whole group.** Change *Find* `a number` to *Find* `every number in 2025 return`; the right side of the bar then reads *against* `Source docs`. Every number in the first group is looked up in the second, with the same Match, Rounding, and filter settings. The result is a table of what was found, what's made of several numbers, and what's missing.
 
    Searches and checks run side by side in one list; each shows its progress and can be stopped. The pane on the right shows the selected number in its file. Hover any number, in the results or in a file, to light up every other place the same value appears; the yellow marks along the scrollbars show where those places are.
 

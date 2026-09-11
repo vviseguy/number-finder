@@ -49,7 +49,7 @@ export function FilesView() {
             </div>
           ))}
         </div>
-        <p className="hint">Give a file a short name with the pencil: it's used everywhere instead of the file name. Click a file to see it on the right.</p>
+        <p className="hint">Long names are shortened to what tells them apart (… marks words every file shares); the full name sits underneath. The pencil sets your own short name. Click a file to see it on the right.</p>
       </main>
       <aside className="side-pane" aria-label="File preview">
         {previewFile && s.previewId ? <Preview amountId={s.previewId} /> : (
@@ -100,7 +100,7 @@ function FileRow({ file: f, selected }: { file: FileEntry; selected: boolean }) 
               </button>
             </span>
           )}
-          {f.nick && <span className="meta">{f.name}</span>}
+          {fileLabel(f) !== f.name && <span className="meta" title={f.name}>{f.name}</span>}
         </span>
       </span>
       <span className="read-cell" role="cell">

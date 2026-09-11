@@ -65,6 +65,8 @@ export const ROUNDING_SHORT: Record<Rounding, string> = { dollar: 'whole dollars
 // or any sum. Every choice also finds the number itself, and exact matches are listed first.
 export const MIN_SUM_SIZE = 2;
 export const MAX_SUM_SIZE = 20;
+/** Choices for the Match dropdown: 1 number, sums of up to N, any sum. */
+export const MATCH_CHOICES: (number | null)[] = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20, null];
 export const MADE_OF_HINT = 'How many numbers may add up to it. Exact matches of the number itself always show first.';
 
 /** Short form for summaries: "1 number", "sums of up to 3", "any sum". */

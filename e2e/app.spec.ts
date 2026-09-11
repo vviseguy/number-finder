@@ -42,7 +42,7 @@ test('the page cannot reach the network', async ({ page }) => {
   await page.screenshot({ path: path.join(SHOTS, '01-first-run.png') });
 });
 
-test('the three steps are the navigation', async ({ page }) => {
+test('the three steps are the navigation, and the theme can be pinned', async ({ page }) => {
   await open(page, ['W-2.pdf']);
   await expect(tab(page, 'Files')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('.files-table .file-row')).toHaveCount(1);
@@ -54,7 +54,18 @@ test('the three steps are the navigation', async ({ page }) => {
   await expect(page.locator('.main-empty')).toBeVisible();
   await find(page, '85,000');
   await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
-  await page.screenshot({ path: path.join(SHOTS, '02-files-view.png') });
+
+  const theme = () => page.evaluate(() => document.documentElement.dataset.theme ?? 'system');
+  expect(await theme()).toBe('system');
+  await page.locator('.theme-toggle').click();
+  expect(await theme()).toBe('light');
+  await page.locator('.theme-toggle').click();
+  expect(await theme()).toBe('dark');
+  await page.screenshot({ path: path.join(SHOTS, '02-dark-pinned.png') });
+  await page.reload();
+  expect(await theme()).toBe('dark');
+  await page.locator('.theme-toggle').click();
+  expect(await theme()).toBe('system');
 });
 
 test('a file can be given a short name that is used everywhere and remembered', async ({ page }) => {
@@ -81,15 +92,28 @@ test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to who
   await expect(first).toContainText('3,234.56');
   await expect(first).toContainText('rounds to 3,235');
   await expect(page.locator('.side-pane .hotspot.hit')).toBeVisible();
+  await expect(page.locator('#find-input')).toHaveValue('3,235'); // the query stays in the bar
   await page.screenshot({ path: path.join(SHOTS, '03-lookup.png') });
+});
+
+test('several numbers start several searches; a repeat just shows the existing one; selecting loads it', async ({ page }) => {
+  await open(page, SOURCES);
+  await find(page, '3,235 85,000');
+  await expect(page.locator('.search-row')).toHaveCount(2);
+  await expect(page.locator('.search-row .status', { hasText: 'Running' })).toHaveCount(0, { timeout: 30_000 });
+  await find(page, '3,235');
+  await expect(page.locator('.search-row')).toHaveCount(2);
+  await expect(page.locator('.notice')).toContainText('already in the list');
+  await page.locator('.search-row', { hasText: '85,000' }).locator('.search-main').click();
+  await expect(page.locator('#find-input')).toHaveValue('85,000');
+  await expect(page.locator('.result-row').first()).toContainText('W-2.pdf');
 });
 
 test('sums show as an equation that opens into the full breakdown, with −( ) for negatives', async ({ page }) => {
   await open(page, ['workpapers.xlsx']);
-  await page.getByLabel('Most numbers in a sum').first().fill('2');
-  await expect(page.getByRole('radio', { name: 'Sums of up to' }).first()).toHaveAttribute('aria-checked', 'true');
-  await page.getByLabel('Also try negatives').first().check();
-  await page.getByLabel('Rounding').first().selectOption('exact');
+  await page.getByLabel('Match').selectOption('2');
+  await page.getByLabel('Negatives').selectOption('on');
+  await page.getByLabel('Rounding').selectOption('exact');
   await find(page, '3,234.56');
   const combo = page.locator('.combo').first();
   const head = combo.locator('.combo-head');
@@ -107,7 +131,7 @@ test('sums show as an equation that opens into the full breakdown, with −( ) f
 
 test('not found shows the likely typo: 9,120 withheld vs W-2 box 2 9,102.00', async ({ page }) => {
   await open(page, SOURCES);
-  await page.getByLabel('Rounding').first().selectOption('exact');
+  await page.getByLabel('Rounding').selectOption('exact');
   await find(page, '9,120');
   const nf = page.locator('.not-found');
   await expect(nf).toContainText('Not found');
@@ -148,23 +172,15 @@ test('a search can be edited, and its past versions viewed and restored', async 
   await expect(page.locator('.version-banner')).toHaveCount(0);
 });
 
-test('several searches run side by side', async ({ page }) => {
-  await open(page, SOURCES);
-  await page.getByRole('radio', { name: 'Any sum' }).first().click();
-  for (const t of ['90,235', '3,235', '2,000', '85,000']) await find(page, t);
-  await expect(page.locator('.search-row')).toHaveCount(4);
-  await expect(page.locator('.search-row .status', { hasText: 'Running' })).toHaveCount(0, { timeout: 30_000 });
-});
-
 test('filters: -hours keeps hours out of the search', async ({ page }) => {
   await open(page, ['payroll.xlsx', 'W-2.pdf']);
-  await page.getByLabel('Rounding').first().selectOption('exact');
+  await page.getByLabel('Rounding').selectOption('exact');
   await find(page, '2,080');
   await expect(page.locator('.result-row').first()).toContainText('Hours');
 
   await find(page, '2,080 -hours');
   await expect(page.locator('.not-found')).toContainText('skipping “hours”');
-  await expect(page.locator('#find-input')).toHaveValue('-hours ');
+  await expect(page.locator('#find-input')).toHaveValue('2,080 -hours');
 
   await find(page, '85,000 -hours');
   const rows = page.locator('.result-row');
@@ -175,7 +191,7 @@ test('filters: -hours keeps hours out of the search', async ({ page }) => {
 
 test('hovering a result marks the same number everywhere', async ({ page }) => {
   await open(page, SOURCES);
-  await page.getByLabel('Rounding').first().selectOption('exact');
+  await page.getByLabel('Rounding').selectOption('exact');
   await find(page, '3,234.56');
   await expect(page.locator('.result-row')).toHaveCount(3);
   await page.locator('.result-row').first().hover();
@@ -189,15 +205,14 @@ test('hovering a result marks the same number everywhere', async ({ page }) => {
   await expect(page.locator('.result-row.linked')).toHaveCount(0);
 });
 
-test('check a group from the same box: the return against the source documents', async ({ page }) => {
+test('check every number in a group against another, from the same bar', async ({ page }) => {
   await open(page, [...SOURCES, ...RETURN]);
   await makeGroup(page, 'Source docs', SOURCES);
   await makeGroup(page, '2025 return', RETURN);
-  await page.getByRole('button', { name: 'Check a group' }).click();
-  await page.getByRole('menuitem', { name: /2025 return/ }).click();
-  await expect(page.locator('.scope-chip')).toContainText('Every number in 2025 return');
+  await page.getByLabel('What to find').selectOption({ label: 'every number in 2025 return' });
+  await expect(page.locator('.searchbar .where .sentence')).toHaveText('against');
   await page.getByLabel('Group to search').selectOption({ label: 'Source docs' });
-  await page.getByLabel('Most numbers in a sum').first().fill('3');
+  await page.getByLabel('Match').selectOption('3');
   await page.getByRole('button', { name: 'Check', exact: true }).click();
 
   await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
