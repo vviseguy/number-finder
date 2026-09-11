@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 
 // The built file from disk, or a live copy: NF_URL=https://vviseguy.github.io/number-finder/ npx playwright test
 const APP = process.env.NF_URL ?? `file:///${path.resolve('dist/numberfinder.html').replace(/\\/g, '/')}`;
@@ -41,6 +41,17 @@ test('the page cannot reach the network', async ({ page }) => {
   const blocked = await page.evaluate(() => fetch('https://example.com/').then(() => false, () => true));
   expect(blocked).toBe(true);
   await page.screenshot({ path: path.join(SHOTS, '01-first-run.png') });
+});
+
+test('the website offers the page as a download; the file on disk does not', async ({ page }) => {
+  await page.goto(APP);
+  const link = page.getByRole('link', { name: 'Download for offline use' });
+  if (!process.env.NF_URL) { await expect(link).toHaveCount(0); return; }
+  const [download] = await Promise.all([page.waitForEvent('download'), link.click()]);
+  expect(download.suggestedFilename()).toBe('numberfinder.html');
+  const saved = path.join(SHOTS, 'offline-copy.html');
+  await download.saveAs(saved);
+  expect(readFileSync(saved, 'utf8')).toContain("default-src 'none'");
 });
 
 test('the three steps are the navigation, and the theme can be pinned', async ({ page }) => {
