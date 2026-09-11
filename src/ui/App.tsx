@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { IconArrowRight, IconDeviceDesktop, IconFileSearch, IconLock, IconMoon, IconSun, IconUpload } from '@tabler/icons-react';
-import { addFiles, newSearch, setDragging, setTheme, setView, useAppState, type Theme, type View } from '../state/store';
+import { addFiles, setDragging, setTheme, setView, useAppState, type Theme, type View } from '../state/store';
 import { chooseFiles, FindBar } from './FindBar';
 import { FilesView } from './FilesView';
 import { GroupsView } from './GroupsView';
@@ -65,7 +65,7 @@ export function App() {
   return (
     <div className="shell" style={{ ['--pane' as string]: `${s.paneWidth}px` }}>
       <header className="topbar">
-        <button type="button" className="brand" title="New search" onClick={newSearch}>
+        <button type="button" className="brand" title="Find" onClick={() => setView('find')}>
           <IconFileSearch className="brand-icon" size={22} stroke={1.75} aria-hidden />
           <span>
             <h1>Number finder</h1>
@@ -82,8 +82,7 @@ export function App() {
                 type="button"
                 className={`step-tab${s.view === st.view ? ' on' : ''}`}
                 aria-current={s.view === st.view ? 'page' : undefined}
-                title={st.view === 'find' ? 'New search' : undefined}
-                onClick={() => (st.view === 'find' ? newSearch() : setView(st.view))}
+                onClick={() => setView(st.view)}
               >
                 <span className="step">{st.n}</span> {st.label}
                 {st.count && <span className="count">{st.count}</span>}
@@ -105,7 +104,7 @@ export function App() {
       {s.view === 'find' && (
         <div className="workspace">
           <div className="col-wrap">
-            <main className="main" ref={main}>
+            <main className="main find-main" ref={main}>
               <RunList />
               <Results />
             </main>

@@ -110,7 +110,7 @@ kbd {
   box-shadow: var(--shadow);
 }
 .searchbar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.searchbar .where { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px; flex: none; border-left: 1px solid var(--line); margin: 8px 0; }
+.searchbar .where { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px; flex: none; border-left: 1px solid var(--line); margin: 8px 0; border-radius: 0 !important; }
 .searchbar .where .pick-text { max-width: min(240px, 28vw); overflow: hidden; text-overflow: ellipsis; }
 .query { flex: 1 1 120px; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 10px; }
 .query-icon { color: var(--text-3); flex: none; }
@@ -127,22 +127,27 @@ kbd {
 .query-echo.bad { background: var(--bad-soft); color: var(--bad); }
 .opts { display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; width: min(100%, 1040px); padding-left: 6px; }
 .opt {
-  display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 999px;
-  padding: 1px 3px 1px 11px; font-size: 12.5px; color: var(--text-3); background: var(--panel);
+  position: relative; display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 999px;
+  padding: 2px 8px 2px 11px; font-size: 12.5px; color: var(--text-3); background: var(--panel); cursor: pointer;
 }
-.opt .sum-size { width: 52px; min-height: 24px !important; padding: 1px 4px !important; margin: 0 4px 0 2px; text-align: center; font-size: 12.5px; font-weight: 600; border-radius: 999px; }
+.opt:hover { background: var(--sunken); border-color: var(--line-2); }
+.opt:focus-within, .searchbar .where:focus-within, .sort-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.opt .sum-size { position: relative; z-index: 1; width: 44px; min-height: 22px !important; padding: 0 4px !important; margin: 0 2px 0 4px; text-align: center; font-size: 12.5px; font-weight: 600; border-radius: 999px; }
 
-/* A dropdown only as wide as its choice: visible text with the real <select> invisible on top (see Pick.tsx). */
-.pick { position: relative; display: inline-flex; align-items: center; border-radius: 999px; }
-.pick-text { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 7px; font-weight: 600; color: var(--text); white-space: nowrap; font-size: 12.5px; }
+/* A dropdown only as wide as its choice (see Pick.tsx): the visible text, then the real <select>, invisible
+   and stretched over the nearest positioned ancestor — the whole pill — so a click anywhere on it opens the list. */
+.pick { display: inline-flex; align-items: center; gap: 2px; }
+.pick-text { display: inline-flex; align-items: center; padding: 1px 0 1px 5px; font-weight: 600; color: var(--text); white-space: nowrap; font-size: 12.5px; }
 .pick-chev { color: var(--text-3); flex: none; }
 .pick select {
   position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer;
   min-height: 0; padding: 0; border: none; border-radius: inherit; background: var(--panel); color: var(--text);
 }
-.pick:hover { background: var(--sunken); }
-.pick:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.searchbar .where { position: relative; cursor: pointer; border-radius: 999px; }
+.searchbar .where:hover { background: var(--sunken); }
 .searchbar .where .pick-text { font-size: 14px; }
+.sort-pick { position: relative; cursor: pointer; border-radius: 999px; padding: 0 4px; }
+.sort-pick:hover { background: var(--sunken); }
 /* The browser's own list for every dropdown: readable in dark mode too. */
 select, option, optgroup { background-color: var(--panel); color: var(--text); }
 
@@ -155,6 +160,10 @@ body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe, body.resizing canvas { pointer-events: none; }
 .col-wrap { position: relative; min-width: 0; min-height: 0; display: flex; }
 .main { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 18px 24px 48px; display: flex; flex-direction: column; gap: 18px; }
+/* The Find column: everything sits centred at a comfortable width; a prompt (no search picked) is centred vertically too. */
+.find-main > * { width: min(100%, 1000px); margin-left: auto; margin-right: auto; flex: none; }
+.find-main > .prompt { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; min-height: 160px; }
+.find-main .main-empty { max-width: 520px; }
 .side-pane {
   min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px;
   padding: 14px; background: var(--panel);
@@ -305,8 +314,18 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
   color: var(--text-2); font-size: 13px;
 }
 .dropzone.first-run { padding: 32px 16px; background: var(--sunken); font-size: 15px; font-weight: 550; }
-.dropzone.big { flex: 1; margin: 12px 0; justify-content: center; font-size: 18px; cursor: pointer; }
+.dropzone.big { flex: 1; margin: 12px 0 8px; justify-content: center; font-size: 18px; cursor: pointer; }
 .dropzone.big .hint { font-size: 13px; max-width: 460px; }
+.line.center { justify-content: center; }
+.setup-buttons { gap: 6px; }
+.folder-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.folder-line .link { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
+.folder-card {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--accent-soft); color: var(--text); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 14px; font-size: 13px;
+}
+.folder-card svg { color: var(--accent-text); flex: none; }
+.add-files-prompt .folder-card, .add-files-prompt .folder-line { justify-content: center; }
 .drop-overlay {
   position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
   background: rgba(31, 95, 168, 0.12); border: 3px dashed var(--accent); pointer-events: none;

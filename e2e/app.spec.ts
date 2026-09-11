@@ -193,10 +193,13 @@ test('sums show as an equation that opens into the full breakdown, with −( ) f
   await page.screenshot({ path: path.join(SHOTS, '04-sums.png') });
 });
 
-test('the title and step 3 start a new search; an empty bar shows the history or a prompt', async ({ page }) => {
+test('the search area keeps its state between pages; an empty bar shows the history or a prompt', async ({ page }) => {
   await page.goto(APP);
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', /^data:image\/svg\+xml/); // the tab icon is the title's icon
   await tab(page, 'Find').click();
-  await expect(page.locator('.add-files-prompt')).toBeVisible();
+  const prompt = page.locator('.find-main > .prompt');
+  await expect(prompt.locator('.add-files-prompt')).toBeVisible();
+  await expect(prompt).toHaveCSS('justify-content', 'center'); // prompts sit in the middle of the column
   await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
   await tab(page, 'Files').click(); // the file list (and its "Reading…" state) lives on the Files view
   await expect(page.locator('.file-row', { hasText: 'W-2.pdf' })).toBeVisible();
@@ -206,18 +209,79 @@ test('the title and step 3 start a new search; an empty bar shows the history or
   await expect(page.locator('.main-empty')).toContainText('Type a number');
   await find(page, '85,000');
   await expect(page.locator('.results')).toBeVisible();
-  await page.locator('.brand').click();
-  await expect(page.locator('#find-input')).toHaveValue('');
-  await expect(page.locator('#find-input')).toBeFocused();
-  await expect(page.locator('.results')).toHaveCount(0);
-  await expect(page.locator('.search-row')).toHaveCount(1);
-  await expect(page.locator('.main-empty')).toContainText('Pick a search from the history');
-  await page.locator('.search-row .search-main').first().click();
+
+  // Switching pages and coming back (by the step or the title) keeps the loaded search.
+  await tab(page, 'Groups').click();
+  await tab(page, 'Find').click();
   await expect(page.locator('.results')).toBeVisible();
+  await expect(page.locator('#find-input')).toHaveValue('85,000');
+  await tab(page, 'Files').click();
+  await page.locator('.brand').click();
+  await expect(page.locator('.results')).toBeVisible();
+  await expect(page.locator('#find-input')).toHaveValue('85,000');
+
+  // An empty bar: the history stays, nothing is selected, and the prompt is centred under it.
   await page.locator('#find-input').fill('');
   await page.locator('#find-input').press('Enter');
   await expect(page.locator('.results')).toHaveCount(0);
+  await expect(page.locator('.search-row')).toHaveCount(1);
+  await expect(page.locator('.main-empty')).toContainText('Pick a search from the history');
   await expect(page.locator('.notice')).toHaveCount(0);
+  const history = (await page.locator('.find-main > .searches').boundingBox())!;
+  const main = (await page.locator('.find-main').boundingBox())!;
+  expect(Math.abs((history.x - main.x) - (main.x + main.width - history.x - history.width))).toBeLessThan(2); // centred
+  await page.locator('.search-row .search-main').first().click();
+  await expect(page.locator('.results')).toBeVisible();
+});
+
+test('the option pills are one dropdown each, with the sum size inside the Match pill', async ({ page }) => {
+  await open(page, ['W-2.pdf']);
+  const match = page.locator('.opt', { hasText: 'Match' });
+  await expect(match.locator('select')).toHaveCSS('opacity', '0');
+  const pill = (await match.boundingBox())!;
+  const sel = (await match.locator('select').boundingBox())!;
+  expect(Math.abs(sel.width - pill.width)).toBeLessThan(3); // the select covers the whole pill, so a click anywhere opens it
+  await page.getByLabel('Match').selectOption('sums');
+  await expect(match.locator('.sum-size + .pick-chev')).toHaveCount(1); // …Sums of up to [3] ▾
+  const negatives = page.locator('.opt', { hasText: 'Negatives' });
+  expect((await negatives.boundingBox())!.width).toBeLessThan(130);
+});
+
+test('the setup can be saved to a file and loaded back, by button or by dropping it', async ({ page }) => {
+  await open(page, SOURCES);
+  await makeGroup(page, 'Source docs', ['W-2.pdf', '1099-INT.pdf']);
+  await find(page, '85,000 -hours');
+  await tab(page, 'Files').click();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save setup' }).click()]);
+  expect(download.suggestedFilename()).toBe('Number finder setup.json');
+  const saved = path.join(SHOTS, 'setup.json');
+  await download.saveAs(saved);
+
+  // A fresh start: nothing remembered.
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(page.locator('.search-row')).toHaveCount(0);
+  await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
+  await expect(page.locator('.file-row', { hasText: 'W-2.pdf' })).toBeVisible();
+
+  // Load it back: the group and the search come back; the missing file is pointed out.
+  await page.getByRole('button', { name: 'Load setup…' }).click({ trial: true });
+  await page.locator('#setup-input').setInputFiles(saved);
+  await expect(page.locator('.notice')).toContainText('Setup loaded from setup.json: 1 group and 1 search. 1 file still to add.');
+  await expect(page.locator('.file-row.missing', { hasText: '1099-INT.pdf' })).toBeVisible();
+  await tab(page, 'Find').click();
+  await expect(page.locator('.search-row').first()).toContainText('85,000');
+  await expect(page.locator('.search-row').first()).toContainText('skipping “hours”');
+  await expect(page.locator('.search-row .status')).toContainText('Not run yet');
+
+  // Dropped with documents, a setup file is taken as a setup, not a document.
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.locator('#file-input').setInputFiles([saved, path.join(FIX, '1099-INT.pdf')]);
+  await expect(page.locator('.notice')).toContainText('Setup loaded');
+  await tab(page, 'Groups').click();
+  await expect(page.locator('.member')).toHaveCount(2);
+  await expect(page.locator('.file-row', { hasText: 'setup.json' })).toHaveCount(0);
 });
 
 test('not found shows the likely typo: 9,120 withheld vs W-2 box 2 9,102.00', async ({ page }) => {

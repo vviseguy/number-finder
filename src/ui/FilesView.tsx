@@ -1,11 +1,64 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconAlertTriangle, IconEye, IconLoader2, IconPencil, IconUpload, IconX } from '@tabler/icons-react';
-import { addMember, fileLabel, groupsOfFile, removeFile, setNick, showPreview, useAppState, type FileEntry } from '../state/store';
+import { IconAlertTriangle, IconDeviceFloppy, IconEye, IconFileImport, IconFolder, IconFolderOpen, IconLoader2, IconPencil, IconRefresh, IconUpload, IconX } from '@tabler/icons-react';
+import {
+  addMember, fileLabel, forgetFolder, groupsOfFile, openFolder, removeFile, reopenFolder, saveSetupFile, setNick, showPreview, useAppState,
+  type FileEntry, type FolderState,
+} from '../state/store';
+import { canOpenFolder } from '../lib/folder';
 import { fileMeta, plural } from '../lib/format';
 import { FileIcon, GroupTag, kindFromName } from './common';
-import { chooseFiles } from './FindBar';
+import { chooseFiles, chooseSetup } from './FindBar';
 import { Preview } from './Preview';
 import { Splitter } from './Splitter';
+
+/** "Open folder…", "Save setup", "Load setup…" — the ways to bring things back next time. */
+export function SetupButtons({ compact }: { compact?: boolean }) {
+  return (
+    <span className="line setup-buttons">
+      {canOpenFolder && (
+        <button type="button" className="btn sm" title="Read every PDF, Excel, and CSV file in a folder (and its subfolders), and remember the folder for next time" onClick={() => void openFolder()}>
+          <IconFolderOpen size={13} aria-hidden /> Open folder…
+        </button>
+      )}
+      {!compact && (
+        <button type="button" className="btn sm" title="Save the groups, short names, options, and searches to a file (not the documents)" onClick={saveSetupFile}>
+          <IconDeviceFloppy size={13} aria-hidden /> Save setup
+        </button>
+      )}
+      <button type="button" className="btn sm" title="Load a saved setup file (or drop it anywhere on the page)" onClick={chooseSetup}>
+        <IconFileImport size={13} aria-hidden /> Load setup…
+      </button>
+    </span>
+  );
+}
+
+/** The remembered folder: reopen it, read it again, or forget it. */
+export function FolderLine({ folder }: { folder: FolderState }) {
+  if (folder.status === 'needs-click') {
+    return (
+      <div className="folder-card">
+        <IconFolder size={16} aria-hidden />
+        <span>Your files last came from the folder <b>{folder.name}</b>.</span>
+        <button type="button" className="btn sm primary" onClick={() => void reopenFolder()}>Reopen folder</button>
+        <button type="button" className="btn sm ghost" onClick={() => void forgetFolder()}>Forget it</button>
+      </div>
+    );
+  }
+  return (
+    <p className="hint folder-line">
+      <IconFolder size={13} aria-hidden />
+      {folder.status === 'reading' && <span>Reading the folder <b>{folder.name}</b>…</span>}
+      {folder.status === 'ready' && <span>Files from the folder <b>{folder.name}</b>; it opens again next time.</span>}
+      {folder.status === 'gone' && <span>Couldn't read the folder <b>{folder.name}</b>. Was it moved or renamed?</span>}
+      {folder.status !== 'reading' && (
+        <>
+          <button type="button" className="link" onClick={() => void reopenFolder()}><IconRefresh size={11} aria-hidden /> Read again</button>
+          <button type="button" className="link" onClick={() => void forgetFolder()}>Forget folder</button>
+        </>
+      )}
+    </p>
+  );
+}
 
 /** Step 1: every file, with a short name you can give it, what was read from it, and its groups. */
 export function FilesView() {
@@ -17,11 +70,13 @@ export function FilesView() {
   if (!s.files.length && !missing.length) {
     return (
       <div className="view files-view">
+        {s.folder && <FolderLine folder={s.folder} />}
         <button type="button" className="dropzone first-run big" onClick={chooseFiles}>
           <IconUpload size={28} stroke={1.5} aria-hidden />
           <span>Drop your tax documents here</span>
           <span className="hint">PDFs, Excel workbooks, and CSV files. They're read inside this page and never uploaded. Click to choose files.</span>
         </button>
+        <div className="line center"><SetupButtons compact /></div>
       </div>
     );
   }
@@ -29,7 +84,11 @@ export function FilesView() {
   return (
     <div className="workspace">
       <main className="main files-main">
-        <h2 className="view-title">Files <span className="count">{plural(s.files.length, 'file')}</span></h2>
+        <div className="line">
+          <h2 className="view-title">Files <span className="count">{plural(s.files.length, 'file')}</span></h2>
+          <span className="push"><SetupButtons /></span>
+        </div>
+        {s.folder && <FolderLine folder={s.folder} />}
         <div className="files-table" role="table">
           <div className="files-head" role="row">
             <span role="columnheader">File</span>

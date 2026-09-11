@@ -4,7 +4,9 @@
 //   - File bytes live outside the state (fileData) so the state stays small and serializable.
 //   - Groups and nicknames reference files by key ("name|size"), so a re-dropped file slots back in.
 //   - Only SETUP is saved between sessions (groups, nicknames, bar settings, run definitions, pane width,
-//     theme, result order) — never file contents, amounts, or results.
+//     theme, result order) — never file contents, amounts, or results. The same setup can be saved to a
+//     file and loaded back (lib/setupfile.ts). A folder of documents can be remembered and reopened
+//     (lib/folder.ts, Chromium only); its files are read again, never stored.
 //   - The search bar starts runs. Each number typed is its own search; `check:Group` looks up every
 //     number in that group (a check) and the other words are filters. Words like in:, sums:, ±, neg
 //     override the option pills for that run.
@@ -18,7 +20,10 @@ import { ROUNDING_TOLERANCE } from '../types';
 import { extractFile } from '../extract';
 import { SearchPool } from '../engine/pool';
 import { forgetPdf, getPdfjs } from '../lib/pdf';
-import { formatMoney, madeOfLabel, parseLimit, roundingPhrase, uid } from '../lib/format';
+import { download } from '../lib/exporter';
+import { canOpenFolder, folderPermission, forgetFolderHandle, loadFolderHandle, pickFolder, readFolder, saveFolderHandle, type DirHandle } from '../lib/folder';
+import { parseSetup, serializeSetup, SETUP_FILE_NAME, type SavedRun, type SavedSetup } from '../lib/setupfile';
+import { formatMoney, madeOfLabel, parseLimit, plural, roundingPhrase, uid } from '../lib/format';
 import { checkToken, hasTerms, normalizeTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, termText, type Terms } from '../lib/query';
 import { SORT_LABEL, sortMatches, type ItemInfo, type ResultSort } from '../lib/rank';
 import { shortNames } from '../lib/names';
@@ -107,6 +112,12 @@ export type Run = SearchRun | CheckRun;
 
 export interface Notice { kind: 'info' | 'warn' | 'error'; text: string; action?: { label: string; run: () => void } }
 
+/**
+ * The remembered folder: 'ready' once its files were read this session, 'needs-click' when the browser
+ * wants a fresh OK before it can be read, 'gone' when it couldn't be read (moved or renamed?).
+ */
+export interface FolderState { name: string; status: 'ready' | 'needs-click' | 'reading' | 'gone' }
+
 export interface AppState {
   view: View;
   theme: Theme;
@@ -129,6 +140,7 @@ export interface AppState {
   previewId: string | null;
   notice: Notice | null;
   dragging: boolean;
+  folder: FolderState | null;
 }
 
 // ---------- store plumbing ----------
@@ -171,12 +183,6 @@ export function useAppState(): AppState {
 
 // ---------- persistence (setup only) ----------
 
-type SavedRun =
-  | { kind: 'search'; target: number; targetDecimals: number; range: { lo: number; hi: number } | null; settings: FindSettings; terms: Terms }
-  | { kind: 'check'; checkGroupId: string; settings: FindSettings; terms: Terms };
-
-interface SavedSetup { groups: Group[]; nicks: Record<string, string>; find: FindSettings; resultSort?: ResultSort; runs: SavedRun[] }
-
 // Function declarations, not consts: loadSetup() runs at module load, before consts below it exist.
 function defaultFind(): FindSettings {
   return { groupId: ALL_FILES, maxCount: 1, rounding: 'dollar', allowFlips: false };
@@ -209,36 +215,65 @@ function loadPaneWidth(): number {
   try { const n = Number(localStorage.getItem(PANE_KEY)); return n >= MIN_PANE ? n : 520; } catch { return 520; }
 }
 
+/** The saved shape back into state: what localStorage and a setup file both restore. */
+function setupToState(saved: SavedSetup): Pick<AppState, 'groups' | 'nicks' | 'find' | 'resultSort' | 'runs'> {
+  return {
+    groups: saved.groups ?? [],
+    nicks: saved.nicks ?? {},
+    find: { ...defaultFind(), ...saved.find },
+    resultSort: saved.resultSort && saved.resultSort in SORT_LABEL ? saved.resultSort : 'best',
+    runs: (saved.runs ?? []).map(restoreRun),
+  };
+}
+
 function loadSetup(): AppState {
   const theme = loadTheme();
   applyTheme(theme);
   const base: AppState = {
     view: 'files', theme, paneWidth: loadPaneWidth(), files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', barFocus: 0, resultSort: 'best',
-    runs: [], selectedRunId: null, previewId: null, notice: null, dragging: false,
+    runs: [], selectedRunId: null, previewId: null, notice: null, dragging: false, folder: null,
   };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
-    const saved = JSON.parse(raw) as SavedSetup;
-    return {
-      ...base,
-      groups: saved.groups ?? [],
-      nicks: saved.nicks ?? {},
-      find: { ...defaultFind(), ...saved.find },
-      resultSort: saved.resultSort && saved.resultSort in SORT_LABEL ? saved.resultSort : 'best',
-      runs: (saved.runs ?? []).map(restoreRun),
-    };
+    return { ...base, ...setupToState(JSON.parse(raw) as SavedSetup) };
   } catch {
     return base;
   }
 }
 
-function saveSetup() {
+/** The setup as saved: definitions only, never file contents or results. */
+function currentSetup(): SavedSetup {
   const runs: SavedRun[] = state.runs.slice(0, 30).map(r => (r.kind === 'check'
     ? { kind: 'check', checkGroupId: r.checkGroupId, settings: r.settings, terms: r.terms }
     : { kind: 'search', target: r.target, targetDecimals: r.targetDecimals, range: r.range, settings: r.settings, terms: r.terms }));
-  const saved: SavedSetup = { groups: state.groups, nicks: state.nicks, find: state.find, resultSort: state.resultSort, runs };
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch { /* storage full or blocked: setup just isn't remembered */ }
+  return { groups: state.groups, nicks: state.nicks, find: state.find, resultSort: state.resultSort, runs, folder: state.folder?.name };
+}
+
+function saveSetup() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentSetup())); } catch { /* storage full or blocked: setup just isn't remembered */ }
+}
+
+/** "Save setup": the same setup as a file, to keep or hand to someone with the documents. */
+export function saveSetupFile() {
+  download(new Blob([serializeSetup(currentSetup())], { type: 'application/json' }), SETUP_FILE_NAME);
+}
+
+/** "Load setup" (or a setup file dropped on the page): replaces groups, short names, options, and searches. */
+export async function loadSetupFile(file: File): Promise<boolean> {
+  let setup: SavedSetup;
+  try { setup = parseSetup(await file.text()).setup; } catch (err) {
+    notify('error', `${file.name}: ${err instanceof Error ? err.message : 'could not be read.'}`);
+    return false;
+  }
+  for (const r of state.runs) stopRun(r.id);
+  set({ ...setupToState(setup), selectedRunId: null, previewId: null });
+  const loaded = new Set(state.files.map(f => f.key));
+  const missing = new Set(state.groups.flatMap(g => g.members).filter(m => !loaded.has(m.key)).map(m => m.key)).size;
+  const what = `${plural(state.groups.length, 'group')} and ${plural(state.runs.length, 'search', 'searches')}`;
+  const where = missing ? ` ${plural(missing, 'file')} still to add${setup.folder ? ` (they came from the folder “${setup.folder}”)` : ''}.` : '';
+  notify('info', `Setup loaded from ${file.name}: ${what}.${where}`);
+  return true;
 }
 
 // Saves are debounced; flush the pending one when the page is closed, reloaded, or hidden.
@@ -400,10 +435,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-export async function addFiles(list: File[]): Promise<void> {
+/** Adds documents. A .json file among them is taken as a setup file. Returns how many documents were new. */
+export async function addFiles(all: File[], quietDupes = false): Promise<number> {
+  const setups = all.filter(f => /\.json$/i.test(f.name));
+  for (const f of setups) await loadSetupFile(f);
+  const list = all.filter(f => !setups.includes(f));
   const fresh = list.filter(f => !state.files.some(e => e.key === fileKey(f)));
   const dupes = list.length - fresh.length;
-  if (dupes) notify('info', dupes === 1 ? `${list.find(f => state.files.some(e => e.key === fileKey(f)))?.name} is already added.` : `${dupes} files were already added.`);
+  if (dupes && !quietDupes) notify('info', dupes === 1 ? `${list.find(f => state.files.some(e => e.key === fileKey(f)))?.name} is already added.` : `${dupes} files were already added.`);
   const entries: FileEntry[] = fresh.map(f => ({
     id: uid('f'), key: fileKey(f), name: f.name, nick: state.nicks[fileKey(f)] ?? '', size: f.size, status: 'reading', parsed: null,
   }));
@@ -424,7 +463,68 @@ export async function addFiles(list: File[]): Promise<void> {
       updateFile(entry.id, { status: 'error', error: timedOut ? "Couldn't read this file: it took longer than a minute." : "Couldn't read this file." });
     }
   }));
+  return entries.length;
 }
+
+// ---------- a remembered folder (Chromium) ----------
+
+const FOLDER_EXTENSIONS = ['.pdf', '.xlsx', '.xlsm', '.xls', '.ods', '.csv', '.tsv', '.txt'];
+
+async function readFromFolder(h: DirHandle) {
+  set({ folder: { name: h.name, status: 'reading' } });
+  try {
+    const files = await readFolder(h, FOLDER_EXTENSIONS);
+    set({ folder: { name: h.name, status: 'ready' } });
+    if (!files.length) { notify('warn', `There are no PDF, Excel, or CSV files in ${h.name}.`); return; }
+    const added = await addFiles(files, true);
+    notify('info', added ? `Read ${plural(added, 'file')} from ${h.name}.` : `The ${plural(files.length, 'file')} in ${h.name} were already added.`);
+  } catch (err) {
+    console.error(err);
+    set({ folder: { name: h.name, status: 'gone' } });
+    notify('error', `Couldn't read the folder ${h.name}. Was it moved or renamed?`);
+  }
+}
+
+/** "Open folder": pick a folder, read its documents, and remember it for next time. */
+export async function openFolder() {
+  if (!canOpenFolder) return;
+  const h = await pickFolder();
+  if (!h) return;
+  try { await saveFolderHandle(h); } catch (err) { console.warn('Folder not remembered', err); }
+  await readFromFolder(h);
+}
+
+/** "Reopen": read the remembered folder again, asking the browser for permission if it wants a click. */
+export async function reopenFolder() {
+  const h = await loadFolderHandle();
+  if (!h) { set({ folder: null }); return; }
+  if (await folderPermission(h, true) !== 'granted') {
+    set({ folder: { name: h.name, status: 'needs-click' } });
+    notify('warn', `Number finder needs your OK to read ${h.name}.`);
+    return;
+  }
+  await readFromFolder(h);
+}
+
+export async function forgetFolder() {
+  try { await forgetFolderHandle(); } catch { /* nothing to forget */ }
+  set({ folder: null });
+}
+
+/** On start: read the remembered folder without asking when the browser has kept the permission; otherwise offer a click. */
+async function restoreFolder() {
+  if (!canOpenFolder) return;
+  const h = await loadFolderHandle();
+  if (!h) return;
+  try {
+    if (await folderPermission(h, false) === 'granted') await readFromFolder(h);
+    else set({ folder: { name: h.name, status: 'needs-click' } });
+  } catch (err) {
+    console.warn('Remembered folder not restored', err);
+    set({ folder: { name: h.name, status: 'gone' } });
+  }
+}
+if (typeof window !== 'undefined') void restoreFolder();
 
 function updateFile(id: string, patch: Partial<FileEntry>) {
   set(s => ({ files: s.files.map(f => (f.id === id ? { ...f, ...patch } : f)) }));

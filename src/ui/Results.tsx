@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { IconArrowsExchange, IconChevronDown, IconHistory, IconSearch, IconUpload } from '@tabler/icons-react';
 import { chooseFiles } from './FindBar';
+import { FolderLine, SetupButtons } from './FilesView';
 import {
   amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, setResultSort, showPreview, shownRun, sortedMatches, targetText,
   useAppState, viewVersion, type Run, type SearchRun,
@@ -26,18 +27,26 @@ export function Results() {
   if (!live) {
     if (!s.files.length) {
       return (
-        <div className="card add-files-prompt">
-          <IconUpload size={26} stroke={1.5} aria-hidden />
-          <p><b>Add your tax documents to start.</b></p>
-          <p className="muted">Drop PDFs, Excel workbooks, or CSV files anywhere on this page. They're read inside the page and never uploaded.</p>
-          <button type="button" className="btn" onClick={chooseFiles}>Choose files</button>
+        <div className="prompt">
+          <div className="card add-files-prompt">
+            <IconUpload size={26} stroke={1.5} aria-hidden />
+            <p><b>Add your tax documents to start.</b></p>
+            <p className="muted">Drop PDFs, Excel workbooks, or CSV files anywhere on this page. They're read inside the page and never uploaded.</p>
+            {s.folder && <FolderLine folder={s.folder} />}
+            <span className="line center">
+              <button type="button" className="btn" onClick={chooseFiles}>Choose files</button>
+              <SetupButtons compact />
+            </span>
+          </div>
         </div>
       );
     }
     return (
-      <p className="empty-note main-empty">
-        {s.runs.length ? 'Pick a search from the history, or type a number in the bar above.' : 'Type a number in the bar above and press Enter, or open a file and click one of its numbers.'}
-      </p>
+      <div className="prompt">
+        <p className="empty-note main-empty">
+          {s.runs.length ? 'Pick a search from the history, or type a number in the bar above.' : 'Type a number in the bar above and press Enter, or open a file and click one of its numbers.'}
+        </p>
+      </div>
     );
   }
   const { run, past } = shownRun(live);

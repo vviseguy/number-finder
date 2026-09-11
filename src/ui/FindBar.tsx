@@ -1,14 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconSearch, IconX } from '@tabler/icons-react';
-import { addFiles, ALL_FILES, clearFindText, groupById, groupByText, groupName, setFind, setFindText, submitFind, useAppState } from '../state/store';
+import { addFiles, ALL_FILES, clearFindText, groupById, groupByText, groupName, loadSetupFile, setFind, setFindText, submitFind, useAppState } from '../state/store';
 import { MADE_OF_HINT, MAX_SUM_SIZE, MIN_SUM_SIZE, ROUNDING_LABEL, ROUNDING_SHORT } from '../lib/format';
 import { checkToken, foldPlusMinus, parseQuery, termsSentence } from '../lib/query';
 import type { Rounding } from '../types';
 import { Pick } from './Pick';
 
-const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt';
+const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.json';
 
 export function chooseFiles() { document.getElementById('file-input')?.click(); }
+export function chooseSetup() { document.getElementById('setup-input')?.click(); }
 
 /** Shown in turn in the empty bar: each one is something you can type. Group names are filled in when there are groups. */
 function hints(groups: string[]): string[] {
@@ -107,7 +108,7 @@ export function FindBar() {
             </button>
           )}
         </div>
-        <label className="where" title={checking ? 'The group the numbers are looked up in' : 'The group to search in'}>
+        <span className="where" title={checking ? 'The group the numbers are looked up in' : 'The group to search in'}>
           <span className="sentence">{checking ? 'against' : 'in'}</span>
           <Pick
             value={groupId}
@@ -115,54 +116,56 @@ export function FindBar() {
             options={[{ value: ALL_FILES, label: 'All files' }, ...s.groups.map(g => ({ value: g.id, label: g.name }))]}
             onChange={v => setFind({ groupId: v })}
           />
-        </label>
+        </span>
         <button type="submit" className="go">Search</button>
       </form>
       {echo && <p className={`query-echo${echoBad ? ' bad' : ''}`} role="status">{echo}</p>}
+      {/* Each pill is one dropdown: a click anywhere on it opens the list (the select is stretched over the pill). */}
       <div className="opts">
-        <label className="opt" title={MADE_OF_HINT}>
-          <span>Match</span>
+        <span className="opt" title={MADE_OF_HINT}>
+          <span className="opt-name">Match</span>
           <Pick
             value={f.maxCount === 1 ? '1' : f.maxCount === null ? 'any' : 'sums'}
             label="Match"
             options={[{ value: '1', label: '1 number' }, { value: 'sums', label: 'Sums of up to' }, { value: 'any', label: 'Any sum' }]}
             onChange={v => setFind({ maxCount: v === '1' ? 1 : v === 'any' ? null : sumSize })}
-          />
-          {sums && (
-            <input
-              type="number"
-              className="sum-size"
-              min={MIN_SUM_SIZE}
-              max={MAX_SUM_SIZE}
-              step={1}
-              value={sumSize}
-              aria-label="Most numbers in a sum"
-              onChange={e => {
-                const n = Number(e.target.value);
-                setSumSize(n);
-                if (Number.isInteger(n) && n >= MIN_SUM_SIZE && n <= MAX_SUM_SIZE) setFind({ maxCount: n });
-              }}
-            />
-          )}
-        </label>
-        <label className="opt" title="How close a match has to be">
-          <span>Rounding</span>
+          >
+            {sums && (
+              <input
+                type="number"
+                className="sum-size"
+                min={MIN_SUM_SIZE}
+                max={MAX_SUM_SIZE}
+                step={1}
+                value={sumSize}
+                aria-label="Most numbers in a sum"
+                onChange={e => {
+                  const n = Number(e.target.value);
+                  setSumSize(n);
+                  if (Number.isInteger(n) && n >= MIN_SUM_SIZE && n <= MAX_SUM_SIZE) setFind({ maxCount: n });
+                }}
+              />
+            )}
+          </Pick>
+        </span>
+        <span className="opt" title="How close a match has to be">
+          <span className="opt-name">Rounding</span>
           <Pick
             value={f.rounding}
             label="Rounding"
             options={(Object.keys(ROUNDING_LABEL) as Rounding[]).map(r => ({ value: r, label: ROUNDING_LABEL[r], short: ROUNDING_SHORT[r] }))}
             onChange={v => setFind({ rounding: v as Rounding, tolerance: undefined })}
           />
-        </label>
-        <label className="opt" title="Let any number count as negative, e.g. a penalty that reduces interest">
-          <span>Negatives</span>
+        </span>
+        <span className="opt" title="Let any number count as negative, e.g. a penalty that reduces interest">
+          <span className="opt-name">Negatives</span>
           <Pick
             value={f.allowFlips ? 'on' : 'off'}
             label="Negatives"
             options={[{ value: 'off', label: 'off' }, { value: 'on', label: 'also try negatives', short: 'on' }]}
             onChange={v => setFind({ allowFlips: v === 'on' })}
           />
-        </label>
+        </span>
       </div>
       <input
         id="file-input"
@@ -171,6 +174,13 @@ export function FindBar() {
         accept={ACCEPT}
         hidden
         onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; if (files.length) void addFiles(files); }}
+      />
+      <input
+        id="setup-input"
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void loadSetupFile(f); }}
       />
     </section>
   );
