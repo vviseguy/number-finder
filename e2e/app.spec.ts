@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const APP = `file:///${path.resolve('dist/numberfinder.html').replace(/\\/g, '/')}`;
+// The built file from disk, or a live copy: NF_URL=https://vviseguy.github.io/number-finder/ npx playwright test
+const APP = process.env.NF_URL ?? `file:///${path.resolve('dist/numberfinder.html').replace(/\\/g, '/')}`;
 const FIX = path.resolve('fixtures');
 const SHOTS = path.resolve('test-results/shots');
 mkdirSync(SHOTS, { recursive: true });

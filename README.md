@@ -8,7 +8,9 @@ Find where the numbers in your tax documents come from. Drop in PDFs, Excel work
 
 ## Open it
 
-Double-click **`numberfinder.html`**. It opens in your browser and works offline. There's nothing to install.
+Go to **https://vviseguy.github.io/number-finder/**, or double-click **`numberfinder.html`** to use it offline. There's nothing to install either way. The website's *Download for offline use* button (on the Files view) saves that one file.
+
+The website is the same single file, published from this private repository on every push to `main` by `.github/workflows/pages.yml`; only the built page is public, not the source. Your documents are still read only inside your browser tab: the same no-network rule applies on the website.
 
 ## Your files stay on your computer
 

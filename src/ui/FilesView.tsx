@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconAlertTriangle, IconDeviceFloppy, IconEye, IconFileImport, IconFolder, IconFolderOpen, IconLoader2, IconPencil, IconRefresh, IconUpload, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconDeviceFloppy, IconDownload, IconEye, IconFileImport, IconFolder, IconFolderOpen, IconLoader2, IconPencil, IconRefresh, IconUpload, IconX } from '@tabler/icons-react';
 import {
   addMember, fileLabel, forgetFolder, groupsOfFile, openFolder, removeFile, reopenFolder, saveSetupFile, setNick, showPreview, useAppState,
   type FileEntry, type FolderState,
@@ -11,10 +11,18 @@ import { chooseFiles, chooseSetup } from './FindBar';
 import { Preview } from './Preview';
 import { Splitter } from './Splitter';
 
+/** Served from a website (GitHub Pages) rather than opened from disk. */
+const hosted = typeof location !== 'undefined' && location.protocol.startsWith('http');
+
 /** "Open folder…", "Save setup", "Load setup…" — the ways to bring things back next time. */
 export function SetupButtons({ compact }: { compact?: boolean }) {
   return (
     <span className="line setup-buttons">
+      {hosted && (
+        <a className="btn sm" href="numberfinder.html" download="numberfinder.html" title="Save this page as one file: double-click it to use Number finder offline, with nothing to install">
+          <IconDownload size={13} aria-hidden /> Download for offline use
+        </a>
+      )}
       {canOpenFolder && (
         <button type="button" className="btn sm" title="Read every PDF, Excel, and CSV file in a folder (and its subfolders), and remember the folder for next time" onClick={() => void openFolder()}>
           <IconFolderOpen size={13} aria-hidden /> Open folder…
