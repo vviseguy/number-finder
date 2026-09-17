@@ -22,12 +22,13 @@ The only things that leave the tab are files you ask for: *Export to Excel* and 
 
 ### How to audit it
 
-Four independent checks, from reading the code to watching the browser:
+Five independent checks, from reading the code to watching the browser:
 
 1. **The lock.** [`src/lib/no-storage.ts`](src/lib/no-storage.ts) runs before anything else in the page and in each background worker, and turns off every way a page can keep data in the browser: `localStorage`, `sessionStorage`, IndexedDB, the Cache API, cookies, the origin private file system, storage buckets, service workers, `history.pushState`, `window.name`, `window.open`, and writing through file handles. Touching any of them throws an error that says *"…is turned off: Number finder keeps everything in memory and saves nothing in the browser."* It also turns them off inside any frame that's reached through the page.
 2. **The source check.** `npm test` runs [`src/lib/no-storage.test.ts`](src/lib/no-storage.test.ts), which fails if the page or any worker doesn't load the lock first, if any other source file names a storage API, or if any form field lacks `autocomplete="off"` (which keeps the browser from recording what was typed, including in crash-recovery data).
 3. **The browser check.** `npm run e2e` includes three tests in [`e2e/app.spec.ts`](e2e/app.spec.ts): every storage API above is off in the page and in a frame; after a full session (files, short names, groups, theme, searches, a whole-group check, a resized pane, text in the bar) the browser's `localStorage`, `sessionStorage`, IndexedDB, Cache Storage, file system, cookies, and `window.name` are all empty, and a reload starts from scratch; and data saved by older versions is deleted (below). These were checked against a broken build: with the lock taken out, the first test fails, and with one write to storage added, the second fails too.
-4. **By hand, in the page.** Open the browser's developer tools on Number finder. In the Console, `localStorage` or `indexedDB` answers with the "turned off" error. Under Application → Storage, the page's local storage, session storage, IndexedDB, and cookies stay empty however much you use it.
+4. **The website.** `node scripts/audit-live.mjs` opens the website copy in Edge, uses it (files, a group, searches, the theme), then asks the browser what the site stored: no cookies, no local storage, no IndexedDB, and a reload starts empty.
+5. **By hand, in the page.** Open the browser's developer tools on Number finder. In the Console, `localStorage` or `indexedDB` answers with the "turned off" error. Under Application → Storage, the page's local storage, session storage, IndexedDB, and cookies stay empty however much you use it.
 
 In the built file, the words `localStorage`, `sessionStorage`, and `indexedDB` appear only inside the lock (once for the page and once per worker) and in a read-only check in ExcelJS, the export library, which the lock turns into "not available".
 
