@@ -8,8 +8,8 @@
 //   3,235 ~intrest           ~word: must mention something close to it (a small typo, 1099int for 1099-INT)
 //   3,235 '2025              'text: read as text even if it looks like a number; numbers that mention it
 //                            are listed first (a preference, not a filter); -'2025 skips it
-//   3,235 in:Source          look in the group whose name starts with "Source" (quotes for spaces)
-//   check:"2025 return"      look up every number in that group (against the "in" group)
+//   3,235 in:1099            look only in files named like that: in:1099 is both 1099s (repeatable; quotes for spaces)
+//   check:1040               look up every number in files named like that, against the other files (repeatable)
 //   3,235 sums:3             sums of up to 3 numbers; sums:=3 exactly 3; sums:2..4 between; sums:2+ at least 2; sums:any
 //   3,235 ±0.50  or  ~0.50   within 50 cents (~ before a number is a tolerance, before a word a fuzzy match)
 //   3,235 neg                let numbers count as negative; neg:1 at most one of them; neg:0 none
@@ -43,10 +43,10 @@ export interface Query {
   numbers: QueryNumber[];
   range: { lo: number; hi: number; text: string } | null;
   terms: Terms;
-  /** Group named with in:, as typed. */
-  inGroup: string | null;
-  /** Group named with check:, as typed: look up every number in it. */
-  checkGroup: string | null;
+  /** Files named with in: (repeatable), as typed. */
+  inFiles: string[];
+  /** Files named with check: (repeatable), as typed: look up every number in them. */
+  checkFiles: string[];
   /** undefined = not given; null = any sum. */
   maxCount: number | null | undefined;
   /** Fewest numbers in a sum (sums:=3, sums:2..4, sums:2+); undefined when not given or 1. */
@@ -66,7 +66,7 @@ const TOKEN = /[^\s"]*"[^"]*"?|\S+/g;
 
 export function parseQuery(text: string): Query {
   const q: Query = {
-    numbers: [], range: null, terms: emptyTerms(), inGroup: null, checkGroup: null,
+    numbers: [], range: null, terms: emptyTerms(), inFiles: [], checkFiles: [],
     maxCount: undefined, minCount: undefined, tolerance: undefined, negatives: undefined, maxFlips: undefined, grouping: undefined, seconds: undefined, errors: [],
   };
   const unquote = (s: string) => s.replace(/^"|"$/g, '').trim();
@@ -84,10 +84,10 @@ export function parseQuery(text: string): Query {
     }
 
     m = /^in:(.+)$/i.exec(raw);
-    if (m) { q.inGroup = unquote(m[1]); continue; }
+    if (m) { add(q.inFiles, unquote(m[1])); continue; }
 
     m = /^(?:check|every|all):(.+)$/i.exec(raw);
-    if (m) { q.checkGroup = unquote(m[1]); continue; }
+    if (m) { add(q.checkFiles, unquote(m[1])); continue; }
 
     m = /^sums?:(.+)$/i.exec(raw);
     if (m) {
@@ -236,9 +236,9 @@ export function dropTokens(text: string, drop: (raw: string) => boolean): string
   return (String(text ?? '').match(TOKEN) ?? []).filter(t => !drop(t)).join(' ');
 }
 
-/** `check:"2025 return"`: the group name as it goes in the bar. */
-export function checkToken(groupName: string): string {
-  return `check:${/\s/.test(groupName) ? `"${groupName}"` : groupName}`;
+/** `check:"1040 draft.pdf"`: a file name as it goes in the bar. */
+export function checkToken(fileName: string): string {
+  return `check:${/\s/.test(fileName) ? `"${fileName}"` : fileName}`;
 }
 
 /**

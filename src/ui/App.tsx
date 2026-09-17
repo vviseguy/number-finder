@@ -1,9 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { IconArrowRight, IconDeviceDesktop, IconFileSearch, IconLock, IconMoon, IconSun, IconUpload } from '@tabler/icons-react';
-import { addFiles, setDragging, setTheme, setView, useAppState, type Theme, type View } from '../state/store';
-import { chooseFiles, FindBar } from './FindBar';
-import { FilesView } from './FilesView';
-import { GroupsView } from './GroupsView';
+import { IconDeviceDesktop, IconFileSearch, IconLock, IconMoon, IconSun, IconUpload } from '@tabler/icons-react';
+import { addFiles, setDragging, setTheme, useAppState, type Theme } from '../state/store';
+import { chooseFiles } from './FilePicker';
+import { FindBar } from './FindBar';
 import { RunList } from './RunList';
 import { Results } from './Results';
 import { SidePane } from './SidePane';
@@ -56,16 +55,10 @@ export function App() {
     };
   }, []);
 
-  const steps: { view: View; n: number; label: string; count: string }[] = [
-    { view: 'files', n: 1, label: 'Files', count: String(s.files.length) },
-    { view: 'groups', n: 2, label: 'Groups', count: String(s.groups.length) },
-    { view: 'find', n: 3, label: 'Find', count: s.runs.length ? String(s.runs.length) : '' },
-  ];
-
   return (
     <div className="shell" style={{ ['--pane' as string]: `${s.paneWidth}px` }}>
       <header className="topbar">
-        <button type="button" className="brand" title="Find" onClick={() => setView('find')}>
+        <div className="brand">
           <IconFileSearch className="brand-icon" size={22} stroke={1.75} aria-hidden />
           <span>
             <h1>Number finder</h1>
@@ -73,23 +66,7 @@ export function App() {
               <IconLock size={12} stroke={2} aria-hidden /> All data stays local
             </span>
           </span>
-        </button>
-        <nav className="steps" aria-label="Steps">
-          {steps.map((st, i) => (
-            <span key={st.view} className="step-wrap">
-              {i > 0 && <IconArrowRight size={15} stroke={1.75} className="step-arrow" aria-hidden />}
-              <button
-                type="button"
-                className={`step-tab${s.view === st.view ? ' on' : ''}`}
-                aria-current={s.view === st.view ? 'page' : undefined}
-                onClick={() => setView(st.view)}
-              >
-                <span className="step">{st.n}</span> {st.label}
-                {st.count && <span className="count">{st.count}</span>}
-              </button>
-            </span>
-          ))}
-        </nav>
+        </div>
         <span className="drop-chip">
           <IconUpload size={14} stroke={1.75} aria-hidden />
           <span>Drop files anywhere, or <button type="button" className="link" onClick={chooseFiles}>choose files</button></span>
@@ -99,21 +76,17 @@ export function App() {
 
       <FindBar />
 
-      {s.view === 'files' && <FilesView />}
-      {s.view === 'groups' && <GroupsView />}
-      {s.view === 'find' && (
-        <div className="workspace">
-          <div className="col-wrap">
-            <main className="main find-main" ref={main}>
-              <RunList />
-              <Results />
-            </main>
-            <ScrollRail target={main} />
-          </div>
-          <Splitter />
-          <SidePane />
+      <div className="workspace">
+        <div className="col-wrap">
+          <main className="main find-main" ref={main}>
+            <RunList />
+            <Results />
+          </main>
+          <ScrollRail target={main} />
         </div>
-      )}
+        <Splitter />
+        <SidePane />
+      </div>
 
       <NoticeBar />
       {s.dragging && (

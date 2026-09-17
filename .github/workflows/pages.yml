@@ -1,6 +1,5 @@
 # Publishes the built page to GitHub Pages on every push to main: https://vviseguy.github.io/number-finder/
-# The repository stays private; only the one built HTML file is public. It is served as index.html and
-# also as numberfinder.html, which the page's "Download for offline use" button saves.
+# The repository stays private; only the one built HTML file is public, served as index.html.
 name: Publish to GitHub Pages
 
 on:
@@ -33,7 +32,6 @@ jobs:
         run: |
           mkdir -p _site
           cp dist/numberfinder.html _site/index.html
-          cp dist/numberfinder.html _site/numberfinder.html
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site

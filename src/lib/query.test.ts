@@ -49,15 +49,17 @@ describe('parseQuery', () => {
     expect(parseQuery('3,300..3,200').range).toMatchObject({ lo: 3200, hi: 3300 });
     expect(parseQuery('a..b').errors[0]).toContain("isn't a range");
   });
-  test('in: picks a group, with quotes for spaces', () => {
-    expect(parseQuery('3,235 in:Source').inGroup).toBe('Source');
-    expect(parseQuery('3,235 in:"Source docs"').inGroup).toBe('Source docs');
+  test('in: names files to look in, as often as you like, with quotes for spaces', () => {
+    expect(parseQuery('3,235 in:1099').inFiles).toEqual(['1099']);
+    expect(parseQuery('3,235 in:W-2 in:"Schedule B"').inFiles).toEqual(['W-2', 'Schedule B']);
+    expect(parseQuery('3,235').inFiles).toEqual([]);
   });
-  test('check: names the group whose every number is looked up', () => {
-    expect(parseQuery('check:"2025 return" in:Source -hours')).toMatchObject({ checkGroup: '2025 return', inGroup: 'Source', terms: { exclude: ['hours'] } });
-    expect(parseQuery('every:Return').checkGroup).toBe('Return');
-    expect(checkToken('2025 return')).toBe('check:"2025 return"');
-    expect(checkToken('Return')).toBe('check:Return');
+  test('check: names the files whose every number is looked up', () => {
+    expect(parseQuery('check:1040 check:"Schedule B" in:1099 -hours')).toMatchObject({ checkFiles: ['1040', 'Schedule B'], inFiles: ['1099'], terms: { exclude: ['hours'] } });
+    expect(parseQuery('every:Return').checkFiles).toEqual(['Return']);
+    expect(checkToken('1040 draft.pdf')).toBe('check:"1040 draft.pdf"');
+    expect(checkToken('W-2.pdf')).toBe('check:W-2.pdf');
+    expect(parseQuery(checkToken('1040 draft.pdf')).checkFiles).toEqual(['1040 draft.pdf']);
   });
   test('sums:, tolerance, and negatives', () => {
     expect(parseQuery('3,235 sums:3')).toMatchObject({ maxCount: 3, minCount: undefined });

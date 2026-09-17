@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconDownload, IconPlayerStop } from '@tabler/icons-react';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupById, groupName, rerunRun, runSummary, selectCheckRow, stopRun, useAppState,
+  amountIndex, fileLabel, fileTermText, rerunRun, runSummary, scopeAmounts, scopePhrase, selectCheckRow, stopRun, useAppState,
   type CheckRow, type CheckRun, type RowStatus,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
@@ -10,14 +10,13 @@ import { download, exportCsv, exportXlsx, type ExportRow } from '../lib/exporter
 import { findNearMiss, type NearMiss } from '../lib/nearmiss';
 import { passesTerms } from '../lib/query';
 import type { Amount, Match } from '../types';
-import { GroupTag } from './common';
 import { defaultRow, NearText, SingleText, sortRows, StatusPill } from './checkParts';
 import { Equation } from './Equation';
 
 type Filter = 'all' | RowStatus;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** The tie-out table for "every number in a group". Its detail and preview live in the side pane. */
+/** The tie-out table for "every number in these files". Its detail and preview live in the side pane. */
 export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boolean }) {
   const s = useAppState();
   const idx = amountIndex(s);
@@ -34,8 +33,8 @@ export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boole
 
   // Likely-intended numbers for misses, and swapped-digit singles that a coincidental sum could hide.
   const candidates = useMemo(
-    () => groupAmounts(s, run.settings.groupId).filter(a => { const h = idx.get(a.id); return h ? passesTerms(a, fileTermText(h.file), run.terms) : false; }),
-    [s.files, s.groups, run.settings.groupId, run.terms, idx],
+    () => scopeAmounts(s, run.settings.scope, run.checkKeys).filter(a => { const h = idx.get(a.id); return h ? passesTerms(a, fileTermText(h.file), run.terms) : false; }),
+    [s.files, run.settings.scope, run.checkKeys, run.terms, idx],
   );
   const nearOf = useMemo(() => {
     const map = new Map<string, NearMiss<Amount> | null>();
@@ -63,8 +62,8 @@ export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boole
   }, [rows, current, run.id]);
 
   const done = run.rows.length - counts.pending;
-  const checkName = groupName(s, run.checkGroupId);
-  const againstName = groupName(s, run.settings.groupId);
+  const checkName = scopePhrase(s, run.checkKeys);
+  const againstName = scopePhrase(s, run.settings.scope, run.checkKeys);
   const settingsText = `Each number in ${checkName} is looked up ${runSummary(s, { ...run, kind: 'check' })}`;
   const skipped = [
     run.skippedByTerms > 0 && `${plural(run.skippedByTerms, 'number')} skipped by the filters`,
@@ -99,7 +98,7 @@ export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boole
     <section className="results check-results" aria-labelledby="h-check">
       <div className="check-top">
         <h3 id="h-check" className="sub-h check-title">
-          Every number in <GroupTag group={groupById(s, run.checkGroupId)} name={checkName} /> against <GroupTag group={groupById(s, run.settings.groupId)} name={againstName} />
+          Every number in <span className="files-chip">{checkName}</span> against <span className="files-chip">{againstName}</span>
         </h3>
         <span className="push line">
           <button type="button" className="btn sm" onClick={async () => download(await exportXlsx(exportRows(), { title: baseName, settings: settingsText }), `${baseName}.xlsx`)}>

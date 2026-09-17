@@ -57,7 +57,7 @@ export interface FileInput {
 export type Rounding = 'exact' | 'cent' | 'dollar';
 export const ROUNDING_TOLERANCE: Record<Rounding, number> = { exact: 0, cent: 0.01, dollar: 0.5 };
 
-/** Per-file limit inside a group: at least `min`, at most `max` (null = no limit) numbers from that file. */
+/** Per-file limit for a search: at least `min`, at most `max` (null = no limit) numbers from that file. */
 export interface FileLimit {
   min: number;
   max: number | null;

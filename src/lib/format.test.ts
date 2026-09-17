@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { decimalsOf, describeLimit, diffPhrase, formatMoney, locationShort, parseAmountInput, parseLimit } from './format';
+import { decimalsOf, diffPhrase, formatMoney, locationShort, parseAmountInput } from './format';
 import type { Amount } from '../types';
 
 describe('parseAmountInput', () => {
@@ -19,30 +19,6 @@ describe('parseAmountInput', () => {
 test('decimalsOf', () => {
   expect(decimalsOf('3,235')).toBe(0);
   expect(decimalsOf('3,234.56')).toBe(2);
-});
-
-describe('parseLimit (per-file limit in a group)', () => {
-  test('blank and any mean no limit', () => {
-    expect(parseLimit('')).toEqual({ min: 0, max: null });
-    expect(parseLimit('any')).toEqual({ min: 0, max: null });
-  });
-  test('a single number is a maximum, not an exact count', () => expect(parseLimit('1')).toEqual({ min: 0, max: 1 }));
-  test('ranges and minimums', () => {
-    expect(parseLimit('1-2')).toEqual({ min: 1, max: 2 });
-    expect(parseLimit('0 to 3')).toEqual({ min: 0, max: 3 });
-    expect(parseLimit('2+')).toEqual({ min: 2, max: null });
-  });
-  test('rejects nonsense', () => {
-    expect(parseLimit('3-1')).toBeNull();
-    expect(parseLimit('lots')).toBeNull();
-  });
-  test('describeLimit reads naturally', () => {
-    expect(describeLimit('')).toBe('any');
-    expect(describeLimit('1')).toBe('max 1');
-    expect(describeLimit('1-2')).toBe('1–2');
-    expect(describeLimit('2+')).toBe('at least 2');
-    expect(describeLimit('x')).toBe('invalid');
-  });
 });
 
 test('madeOf and negatives labels cover exactly, between, at least, and a cap on negatives', async () => {

@@ -1,10 +1,10 @@
 import { IconCheck, IconHistory, IconListCheck, IconPlayerStop, IconRefresh, IconX } from '@tabler/icons-react';
 import {
-  clearFinished, groupById, groupName, removeRun, rerunRun, runSummary, selectRun, stopRun, targetText, useAppState, viewVersion,
+  clearFinished, removeRun, rerunRun, runSummary, scopePhrase, selectRun, stopRun, targetText, useAppState, viewVersion,
   type CheckRun, type Run, type SearchRun,
 } from '../state/store';
 import { plural } from '../lib/format';
-import { arrowNav, GroupTag } from './common';
+import { arrowNav } from './common';
 import { formatTime } from './checkParts';
 
 /** Every search and check, newest first. Selecting one loads it into the bar and shows its results. */
@@ -30,7 +30,7 @@ export function RunList() {
                 : (
                   <span className="target run-check">
                     <IconListCheck size={15} aria-hidden /> Every number in
-                    <GroupTag group={groupById(s, r.checkGroupId)} name={groupName(s, r.checkGroupId)} />
+                    <span className="files-chip">{scopePhrase(s, r.checkKeys)}</span>
                   </span>
                 )}
               <span className="meta">{runSummary(s, r)}</span>

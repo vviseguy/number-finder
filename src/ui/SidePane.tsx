@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
 import { IconArrowsExchange, IconEye, IconSearch } from '@tabler/icons-react';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, runSearch, showPreview, shownRun, sortedMatches, useAppState,
+  againstKeys, amountIndex, fileLabel, fileTermText, runSearch, scopeAmounts, scopePhrase, showPreview, shownRun, sortedMatches, useAppState,
   type CheckRow, type CheckRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
@@ -59,9 +59,9 @@ function CheckDetail({ run, row, readOnly }: { run: CheckRun; row: CheckRow; rea
   // Only the row, the files, and the settings matter here — not every progress update of the check.
   const near = useMemo(() => {
     if (!hit || (row.status !== 'notfound' && row.status !== 'combo')) return null;
-    const pool = groupAmounts(s, run.settings.groupId).filter(a => { const h = idx.get(a.id); return a.id !== row.amountId && !!h && passesTerms(a, fileTermText(h.file), run.terms); });
+    const pool = scopeAmounts(s, run.settings.scope, run.checkKeys).filter(a => { const h = idx.get(a.id); return a.id !== row.amountId && !!h && passesTerms(a, fileTermText(h.file), run.terms); });
     return findNearMiss(hit.amount.value, hit.amount.decimals, pool, a => a.value, run.settings.allowFlips);
-  }, [hit, row.amountId, row.status, run.settings, run.terms, s.files, s.groups, idx]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hit, row.amountId, row.status, run.settings, run.checkKeys, run.terms, s.files, idx]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!hit) return null;
   const { amount } = hit;
   const st = run.settings;
@@ -96,17 +96,17 @@ function CheckDetail({ run, row, readOnly }: { run: CheckRun; row: CheckRow; rea
 
       {row.status === 'notfound' && (
         <>
-          <p>Nothing in {groupName(s, st.groupId)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount, st.minCount)}, {roundingPhrase(st.rounding, st.tolerance)}.</p>
+          <p>Nothing in {scopePhrase(s, st.scope, run.checkKeys)} makes {formatMoney(amount.value, amount.decimals)} {madeOfPhrase(st.maxCount, st.minCount)}, {roundingPhrase(st.rounding, st.tolerance)}.</p>
           {near
             ? <NearButton near={near} target={amount.value} decimals={amount.decimals} onShow={showPreview} />
-            : <p className="muted">Nothing in {groupName(s, st.groupId)} is close to it either.</p>}
+            : <p className="muted">Nothing in {scopePhrase(s, st.scope, run.checkKeys)} is close to it either.</p>}
           {!readOnly && (
             <div className="line">
               <button
                 type="button"
                 className="btn sm"
                 title="Starts a search of its own for this number"
-                onClick={() => runSearch(amount.value, amount.decimals, null, run.terms, amount.id, { groupId: st.groupId, maxCount: null, allowFlips: true, rounding: st.rounding })}
+                onClick={() => runSearch(amount.value, amount.decimals, null, run.terms, amount.id, { scope: againstKeys(s, run), maxCount: null, allowFlips: true, rounding: st.rounding })}
               >
                 <IconSearch size={12} aria-hidden /> Search {formatMoney(amount.value, amount.decimals)} with any sum and negatives
               </button>

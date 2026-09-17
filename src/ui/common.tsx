@@ -1,16 +1,10 @@
 import { IconFileSpreadsheet, IconFileTypeCsv, IconFileTypePdf } from '@tabler/icons-react';
 import type { FileKind } from '../types';
-import type { Group } from '../state/store';
 
 export function FileIcon({ kind, size = 16 }: { kind: FileKind | undefined; size?: number }) {
   if (kind === 'excel') return <IconFileSpreadsheet className="ficon excel" size={size} stroke={1.75} aria-hidden />;
   if (kind === 'csv') return <IconFileTypeCsv className="ficon csv" size={size} stroke={1.75} aria-hidden />;
   return <IconFileTypePdf className="ficon pdf" size={size} stroke={1.75} aria-hidden />;
-}
-
-export function GroupTag({ group, name }: { group?: Group; name?: string }) {
-  if (!group) return <span className="gtag gall">{name ?? 'All files'}</span>;
-  return <span className={`gtag gc${group.color}`}>{group.name}</span>;
 }
 
 /** Guess the file kind from a name, for files that aren't loaded (restored group members). */

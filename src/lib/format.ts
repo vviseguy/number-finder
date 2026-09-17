@@ -1,6 +1,6 @@
 // Parsing and display helpers for the UI. Pure: no DOM, no state.
 
-import type { Amount, FileKind, FileLimit, ParsedFile, Rounding } from '../types';
+import type { Amount, FileKind, ParsedFile, Rounding } from '../types';
 
 /** Parse a typed amount: "3,235", "$3,234.56", "(75.00)" → -75, "75.00-" → -75. Null when not a number. */
 export function parseAmountInput(text: string): number | null {
@@ -18,30 +18,6 @@ export function parseAmountInput(text: string): number | null {
 export function decimalsOf(text: string): number {
   const m = /\.(\d+)/.exec(text);
   return m ? m[1].length : 0;
-}
-
-/**
- * Per-file limit inside a group.
- *   "" / "any" → no limit        "1" → at most 1        "1-2" → at least 1, at most 2        "2+" → at least 2
- */
-export function parseLimit(text: string): FileLimit | null {
-  const t = String(text ?? '').trim().toLowerCase();
-  if (t === '' || t === 'any') return { min: 0, max: null };
-  let m = /^(\d+)$/.exec(t);
-  if (m) return { min: 0, max: +m[1] };
-  m = /^(\d+)\s*(?:-|–|to)\s*(\d+)$/.exec(t);
-  if (m) return +m[1] <= +m[2] ? { min: +m[1], max: +m[2] } : null;
-  m = /^(\d+)\s*\+$/.exec(t);
-  if (m) return { min: +m[1], max: null };
-  return null;
-}
-
-export function describeLimit(text: string): string {
-  const l = parseLimit(text);
-  if (!l) return 'invalid';
-  if (l.max === null) return l.min === 0 ? 'any' : `at least ${l.min}`;
-  if (l.min === 0) return `max ${l.max}`;
-  return l.min === l.max ? `exactly ${l.min}` : `${l.min}–${l.max}`;
 }
 
 const money2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -94,7 +70,7 @@ export function madeOfPhrase(max: number | null, min = 1): string {
 // null = no limit: the search runs until it has tried everything or is stopped.
 export const SEARCH_SECONDS: (number | null)[] = [10, 30, 120, 600, null];
 export const DEFAULT_SEARCH_SECONDS = 30;
-/** A group check searches each of its numbers in turn; this is the time each one gets. */
+/** A check searches each of its numbers in turn; this is the time each one gets. */
 export const CHECK_SECONDS = [2, 10, 30, 120];
 export const DEFAULT_CHECK_SECONDS = 2;
 

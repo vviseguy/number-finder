@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { IconArrowsExchange, IconChevronDown, IconClock, IconHistory, IconLoader2, IconPlayerStop, IconSearch, IconUpload } from '@tabler/icons-react';
-import { chooseFiles } from './FindBar';
-import { AddButtons, FolderLine } from './FilesView';
+import { chooseFiles, FolderLine, OpenFolderButton } from './FilePicker';
 import {
-  amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, searchSecondsOf, setResultSort, showPreview, shownRun, sortedMatches,
-  stopRun, SUM_MAX_RESULTS, targetText, useAppState, viewVersion, type Run, type SearchRun,
+  amountIndex, fileLabel, fileTermText, restoreVersion, retryWith, searchSecondsOf, setResultSort, showPreview, shownRun, sortedMatches,
+  scopeAmounts, scopePhrase, stopRun, SUM_MAX_RESULTS, targetText, useAppState, viewVersion, type Run, type SearchRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
 import { elapsedLabel, formatMoney, locationShort, longerSeconds, madeOfPhrase, plural, roundingPhrase, secondsLabel } from '../lib/format';
@@ -36,7 +35,7 @@ export function Results() {
             {s.folder && <FolderLine folder={s.folder} />}
             <span className="line center">
               <button type="button" className="btn" onClick={chooseFiles}>Choose files</button>
-              <AddButtons />
+              <OpenFolderButton className="btn" />
             </span>
           </div>
         </div>
@@ -45,7 +44,7 @@ export function Results() {
     return (
       <div className="prompt">
         <p className="empty-note main-empty">
-          {s.runs.length ? 'Pick a search from the history, or type a number in the bar above.' : 'Type a number in the bar above and press Enter, or open a file and click one of its numbers.'}
+          {s.runs.length ? 'Pick a search from the history, or type a number in the bar above.' : 'Type a number in the bar above and press Enter. The file list next to the search bar shows each file, and every number in a file is clickable.'}
         </p>
       </div>
     );
@@ -151,7 +150,7 @@ function SearchNote({ run: r, readOnly }: { run: SearchRun; readOnly: boolean })
               <IconSearch size={12} aria-hidden /> Search again {longer === null ? 'with no limit' : `for ${secondsLabel(longer)}`}
             </button>
           )}
-          <NarrowChips settings={r.settings} terms={r.terms} onApply={patch => retryWith(r.id, patch)} />
+          <NarrowChips settings={r.settings} onApply={patch => retryWith(r.id, patch)} />
         </span>
       )}
     </div>
@@ -206,7 +205,7 @@ function ItemRow({ item, match, run, previewId, nested }: { item: MatchItem; mat
 function NotFound({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   const s = useAppState();
   const idx = amountIndex(s);
-  const candidates = groupAmounts(s, r.settings.groupId)
+  const candidates = scopeAmounts(s, r.settings.scope)
     .filter(a => a.id !== r.originId && passesTerms(a, idx.get(a.id) ? fileTermText(idx.get(a.id)!.file) : '', r.terms));
   const near = r.range ? null : findNearMiss(r.target, r.targetDecimals, candidates, a => a.value, r.settings.allowFlips);
   const how = r.range ? '' : ` ${madeOfPhrase(r.settings.maxCount, r.settings.minCount)}, ${roundingPhrase(r.settings.rounding, r.settings.tolerance)}`;
@@ -223,13 +222,13 @@ function NotFound({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   return (
     <div className="not-found">
       {r.reason === 'timeLimit' || r.reason === 'stopped' ? (
-        <p><b>Nothing found before it stopped.</b> Not every sum in {groupName(s, r.settings.groupId)} was tried yet{filters && ` (${filters})`}, so a match may still exist.</p>
+        <p><b>Nothing found before it stopped.</b> Not every sum in {scopePhrase(s, r.settings.scope)} was tried yet{filters && ` (${filters})`}, so a match may still exist.</p>
       ) : (
-      <p><b>Not found.</b> {r.range ? `No number in ${groupName(s, r.settings.groupId)} falls between ${targetText(r).replace('..', ' and ')}` : `Nothing in ${groupName(s, r.settings.groupId)} makes ${formatMoney(r.target, r.targetDecimals)}${how}`}{filters && ` (${filters})`}.</p>
+      <p><b>Not found.</b> {r.range ? `No number in ${scopePhrase(s, r.settings.scope)} falls between ${targetText(r).replace('..', ' and ')}` : `Nothing in ${scopePhrase(s, r.settings.scope)} makes ${formatMoney(r.target, r.targetDecimals)}${how}`}{filters && ` (${filters})`}.</p>
       )}
       {near
         ? <NearButton near={near} target={r.target} decimals={r.targetDecimals} onShow={showPreview} />
-        : !r.range && <p className="muted">Nothing in {groupName(s, r.settings.groupId)} is close to it either.</p>}
+        : !r.range && <p className="muted">Nothing in {scopePhrase(s, r.settings.scope)} is close to it either.</p>}
       {!readOnly && tries.length > 0 && (
         <div className="line">
           {tries.map(t => (

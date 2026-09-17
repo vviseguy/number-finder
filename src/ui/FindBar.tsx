@@ -1,25 +1,26 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconSearch, IconX } from '@tabler/icons-react';
-import { addFiles, ALL_FILES, clearFindText, groupById, groupByText, groupName, setFind, setFindText, submitFind, useAppState } from '../state/store';
+import {
+  addFiles, clearFindText, filesByText, keysOf, noFileMessage, scopePhrase, searchSecondsOf, setFind, setFindText, settingsFor, submitFind, useAppState,
+} from '../state/store';
 import {
   CHECK_SECONDS, DEFAULT_CHECK_SECONDS, MADE_OF_HINT, MAX_SUM_SIZE, MIN_SUM_SIZE, ROUNDING_LABEL, ROUNDING_SHORT, SEARCH_SECONDS, secondsLabel,
 } from '../lib/format';
-import { searchSecondsOf } from '../state/store';
 import { checkToken, foldPlusMinus, parseQuery, termsSentence } from '../lib/query';
 import { GROUPING_HINT, GROUPING_LABEL, GROUPING_SHORT, GROUPINGS, groupingOf, type Grouping } from '../lib/rank';
 import type { Rounding } from '../types';
 import { Pick } from './Pick';
 import { SizeNote } from './Narrow';
+import { FilePicker } from './FilePicker';
 
 const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt';
 const MAX_NEGATIVES = 20;
 
-export function chooseFiles() { document.getElementById('file-input')?.click(); }
-
-/** Shown in turn in the empty bar: each one is something you can type. Group names are filled in when there are groups. */
-function hints(groups: string[]): string[] {
-  const g = groups[0] ?? 'Source docs';
-  const g2 = groups[1] ?? groups[0] ?? '2025 return';
+/** Shown in turn in the empty bar: each one is something you can type. The in: and check: examples use the files added. */
+function hints(files: string[]): string[] {
+  const token = (name: string) => (/\s/.test(name) ? `"${name}"` : name);
+  const a = files[0] ?? '1099';
+  const b = files[1] ?? files[0] ?? '1040';
   return [
     '3,235',
     '3,235 -hours  ·  skip numbers labeled “hours”',
@@ -36,8 +37,8 @@ function hints(groups: string[]): string[] {
     '3,235 ±0.50  ·  within 50 cents (type +-)',
     '3,235 neg  ·  let numbers count as negative',
     '3,235 neg:1  ·  at most one number counted as negative',
-    `3,235 in:${/\s/.test(g) ? `"${g}"` : g}  ·  look in a group by name`,
-    `${checkToken(g2)}  ·  look up every number in a group`,
+    `3,235 in:${token(a)}  ·  look only in the files named like that`,
+    `${checkToken(b)}  ·  look up every number in a file against the other files`,
   ];
 }
 
@@ -58,7 +59,7 @@ function CountBox({ value, min, max, label, onChange }: { value: number; min: nu
 }
 
 /**
- * Sums only. A search: "Time limit" (10 s … No limit). A group check: "Time per number". A value typed in
+ * Sums only. A search: "Time limit" (10 s … No limit). A check: "Time per number". A value typed in
  * the bar (time:45s) that isn't one of the choices is shown as its own choice.
  */
 function TimePill({ checking }: { checking: boolean }) {
@@ -67,7 +68,7 @@ function TimePill({ checking }: { checking: boolean }) {
     const cur = f.checkSeconds ?? DEFAULT_CHECK_SECONDS;
     const choices = CHECK_SECONDS.includes(cur) ? CHECK_SECONDS : [...CHECK_SECONDS, cur].sort((a, b) => a - b);
     return (
-      <span className="opt" title="A group check searches each of its numbers in turn; this is how long each one may take">
+      <span className="opt" title="A check searches each of its numbers in turn; this is how long each one may take">
         <span className="opt-name">Time per number</span>
         <Pick value={String(cur)} label="Time per number" options={choices.map(x => ({ value: String(x), label: secondsLabel(x) }))} onChange={v => setFind({ checkSeconds: Number(v) })} />
       </span>
@@ -90,36 +91,38 @@ function TimePill({ checking }: { checking: boolean }) {
 }
 
 /**
- * The search bar under the header, on every view:
+ * The search bar under the header:
  *   [🔍 3,235 -hours]  in [All files ▾]  (Search)
- * `check:"2025 return"` in the bar looks up every number in that group; the right side then reads
- * "against". The query stays in the bar after searching; selecting a search in the history loads it back.
+ * "in" is a checklist of the files (FilePicker). `check:1040` in the bar looks up every number in the files
+ * named that way; the right side then reads "against". The query stays in the bar after searching;
+ * selecting a search in the history loads it back.
  */
 export function FindBar() {
   const s = useAppState();
   const f = s.find;
-  const groupId = f.groupId === ALL_FILES || groupById(s, f.groupId) ? f.groupId : ALL_FILES;
   const input = useRef<HTMLInputElement>(null);
   const pendingCaret = useRef<number | null>(null);
   const [hint, setHint] = useState(0);
   const [focused, setFocused] = useState(false);
-  const groupNames = s.groups.map(g => g.name);
-  const HINTS = useMemo(() => hints(groupNames), [groupNames.join('\n')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fileNames = s.files.map(x => x.name.replace(/\.[^.]+$/, ''));
+  const HINTS = useMemo(() => hints(fileNames), [fileNames.join('\n')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = parseQuery(s.findText);
-  const checking = q.checkGroup !== null;
-  const checkId = checking ? groupByText(s, q.checkGroup!) : undefined;
+  const checking = q.checkFiles.length > 0;
+  const checkKeys = keysOf(q.checkFiles.flatMap(text => filesByText(s, text)));
+  const unknown = [...q.inFiles, ...q.checkFiles].find(text => !filesByText(s, text).length);
+  const scope = settingsFor(s, q).scope;
+  const inWords = q.inFiles.length && unknown === undefined ? `Looking only in ${scopePhrase(s, scope)}.` : '';
   const echo = q.errors[0]
-    ?? (checking
-      ? (!checkId || checkId === ALL_FILES
-        ? `No group is called “${q.checkGroup}”. ${s.groups.length ? `Groups: ${groupNames.join(', ')}.` : 'Make one in step 2.'}`
-        : q.numbers.length || q.range
-          ? `check: looks up every number in ${groupName(s, checkId)}, so leave the numbers out — or take check: away to search for ${q.numbers[0]?.text ?? q.range?.text}.`
-          : `Every number in ${groupName(s, checkId)} will be looked up against ${groupName(s, q.inGroup ? groupByText(s, q.inGroup) ?? groupId : groupId)}. ${termsSentence(q.terms)}`.trim())
-      : [q.numbers.length > 1 ? `${q.numbers.length} numbers: each is its own search.` : '', termsSentence(q.terms)].filter(Boolean).join(' '));
-  const echoBad = q.errors.length > 0 || (checking && (!checkId || checkId === ALL_FILES || q.numbers.length > 0 || !!q.range));
+    ?? (unknown !== undefined ? noFileMessage(s, unknown)
+      : checking
+        ? (q.numbers.length || q.range
+          ? `check: looks up every number in ${scopePhrase(s, checkKeys)}, so leave the numbers out — or take check: away to search for ${q.numbers[0]?.text ?? q.range?.text}.`
+          : `Every number in ${scopePhrase(s, checkKeys)} will be looked up in ${scopePhrase(s, scope, checkKeys)}. ${termsSentence(q.terms)}`.trim())
+        : [q.numbers.length > 1 ? `${q.numbers.length} numbers: each is its own search.` : '', inWords, termsSentence(q.terms)].filter(Boolean).join(' '));
+  const echoBad = q.errors.length > 0 || unknown !== undefined || (checking && (q.numbers.length > 0 || !!q.range));
 
-  // A new search (Search on an empty bar, or "Check every number…" on a group) puts the cursor in the bar.
+  // A new search (Search on an empty bar, or "Check every number" on a file) puts the cursor in the bar.
   useEffect(() => { if (s.barFocus) input.current?.focus(); }, [s.barFocus]);
 
   // After "+-" was folded into "±", put the caret back where it was.
@@ -183,15 +186,7 @@ export function FindBar() {
             </button>
           )}
         </div>
-        <span className="where" title={checking ? 'The group the numbers are looked up in' : 'The group to search in'}>
-          <span className="sentence">{checking ? 'against' : 'in'}</span>
-          <Pick
-            value={groupId}
-            label="Group to search"
-            options={[{ value: ALL_FILES, label: 'All files' }, ...s.groups.map(g => ({ value: g.id, label: g.name }))]}
-            onChange={v => setFind({ groupId: v })}
-          />
-        </span>
+        <FilePicker checking={checkKeys} />
         <button type="submit" className="go">Search</button>
       </form>
       {echo && <p className={`query-echo${echoBad ? ' bad' : ''}`} role="status">{echo}</p>}

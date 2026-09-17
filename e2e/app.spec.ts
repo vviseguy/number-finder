@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 // The built file from disk, or a live copy: NF_URL=https://vviseguy.github.io/number-finder/ npx playwright test
 const APP = process.env.NF_URL ?? `file:///${path.resolve('dist/numberfinder.html').replace(/\\/g, '/')}`;
@@ -42,27 +42,33 @@ const NOTHING = { localStorage: [], sessionStorage: [], indexedDB: [], caches: [
 const SOURCES = ['W-2.pdf', '1099-INT.pdf', '1099-DIV.pdf', 'workpapers.xlsx'];
 const RETURN = ['1040 draft.pdf', 'Schedule B.pdf'];
 
-const tab = (page: Page, name: string) => page.locator('.step-tab', { hasText: name });
+/** The "in" button in the search bar, which opens the file list. */
+const picker = (page: Page) => page.locator('#file-picker');
+const fileItem = (page: Page, name: string) => page.locator('.file-item', { hasText: name });
+
+/** Waits until the file list holds `count` files and none is still being read. */
+async function filesRead(page: Page, count: number) {
+  await expect(picker(page)).toHaveAttribute('data-files', String(count));
+  await expect(picker(page)).toHaveAttribute('data-reading', '0');
+}
 
 async function open(page: Page, files: string[]) {
   await page.goto(APP);
   await page.locator('#file-input').setInputFiles(files.map(f => path.join(FIX, f)));
-  for (const f of files) await expect(page.locator('.file-row', { hasText: f })).toBeVisible();
-  await expect(page.getByText('Reading…')).toHaveCount(0);
+  await filesRead(page, files.length);
+}
+
+/** Opens the file list (if it isn't open) and returns it. */
+async function openFileList(page: Page) {
+  if ((await picker(page).getAttribute('aria-expanded')) !== 'true') await picker(page).click();
+  const panel = page.locator('.file-panel');
+  await expect(panel).toBeVisible();
+  return panel;
 }
 
 async function find(page: Page, text: string) {
   await page.locator('#find-input').fill(text);
   await page.locator('#find-input').press('Enter');
-}
-
-async function makeGroup(page: Page, name: string, files: string[]) {
-  await tab(page, 'Groups').click();
-  await page.getByRole('button', { name: 'Add group' }).click();
-  const nameInput = page.getByLabel('Group name');
-  await nameInput.fill(name);
-  await nameInput.press('Enter');
-  for (const f of files) await page.getByLabel(`Add a file to ${name}`).selectOption({ label: f });
 }
 
 test('the page cannot reach the network', async ({ page }) => {
@@ -74,29 +80,27 @@ test('the page cannot reach the network', async ({ page }) => {
   await page.screenshot({ path: path.join(SHOTS, '01-first-run.png') });
 });
 
-test('the website offers the page as a download; the file on disk does not', async ({ page }) => {
+test('there are no steps and no offline download: one screen', async ({ page }) => {
   await page.goto(APP);
-  const link = page.getByRole('link', { name: 'Download for offline use' });
-  if (!process.env.NF_URL) { await expect(link).toHaveCount(0); return; }
-  const [download] = await Promise.all([page.waitForEvent('download'), link.click()]);
-  expect(download.suggestedFilename()).toBe('numberfinder.html');
-  const saved = path.join(SHOTS, 'offline-copy.html');
-  await download.saveAs(saved);
-  expect(readFileSync(saved, 'utf8')).toContain("default-src 'none'");
+  await expect(page.locator('.step-tab')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /offline/i })).toHaveCount(0);
+  await expect(page.getByText(/group/i)).toHaveCount(0);
+  await expect(page.locator('.searchbar')).toBeVisible();
+  await expect(page.locator('.add-files-prompt')).toBeVisible();
 });
 
-test('the three steps are the navigation, and the theme can be pinned for the session', async ({ page }) => {
+test('the file list shows a file on the right, and the theme can be pinned for the session', async ({ page }) => {
   await open(page, ['W-2.pdf']);
-  await expect(tab(page, 'Files')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.files-table .file-row')).toHaveCount(1);
-  await page.locator('.file-row').first().click();
+  const panel = await openFileList(page);
+  await expect(panel.locator('.file-item')).toHaveCount(1);
+  await expect(fileItem(page, 'W-2.pdf')).toContainText('PDF · 1 page');
+  await panel.getByRole('button', { name: 'W-2.pdf', exact: true }).click();
   await expect(page.locator('.side-pane .pdf-page')).toBeVisible();
-  await tab(page, 'Groups').click();
-  await expect(page.getByRole('button', { name: 'Add group' })).toBeVisible();
-  await tab(page, 'Find').click();
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
   await expect(page.locator('.main-empty')).toBeVisible();
   await find(page, '85,000');
-  await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.results')).toBeVisible();
 
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme ?? 'system');
   expect(await theme()).toBe('system');
@@ -115,19 +119,69 @@ test('the three steps are the navigation, and the theme can be pinned for the se
 
 test('a file can be given a short name that is used everywhere, for this session only', async ({ page }) => {
   await open(page, ['W-2.pdf']);
-  await page.getByRole('button', { name: 'Rename W-2.pdf' }).click();
+  const panel = await openFileList(page);
+  await panel.getByRole('button', { name: 'Rename W-2.pdf' }).click();
   const input = page.getByLabel('Short name for W-2.pdf');
   await input.fill('W2');
-  await input.press('Enter');
-  await expect(page.locator('.file-row').first()).toContainText('W2');
-  await expect(page.locator('.file-row').first()).toContainText('W-2.pdf');
+  await input.press('Enter'); // renames; doesn't start a search
+  await expect(page.locator('.file-item-name')).toHaveText('W2');
+  await expect(fileItem(page, 'W2')).toContainText('W-2.pdf ·');
+  await expect(page.locator('.notice')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await find(page, '85,000');
   await expect(page.locator('.result-row').first()).toContainText('W2 · page 1');
   await page.reload();
   await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
-  await expect(page.locator('.file-row').first()).toContainText('W-2.pdf');
-  await expect(page.locator('.file-row').first()).not.toContainText('W2 '); // not remembered
-  await expect(page.locator('.file-name').first()).toHaveText('W-2.pdf');
+  await filesRead(page, 1);
+  await openFileList(page);
+  await expect(page.locator('.file-item-name')).toHaveText('W-2.pdf'); // not remembered
+});
+
+test('the file list picks the files to search: all by default, then none, one, several, and all again', async ({ page }) => {
+  await open(page, SOURCES);
+  await expect(picker(page)).toContainText('All files');
+  const panel = await openFileList(page);
+  const ticks = panel.locator('.file-item input[type=checkbox]');
+  await expect(ticks).toHaveCount(4);
+  for (const tick of await ticks.all()) await expect(tick).toBeChecked();
+
+  await panel.getByRole('button', { name: 'Select none' }).click();
+  for (const tick of await ticks.all()) await expect(tick).not.toBeChecked();
+  await expect(picker(page)).toContainText('No files');
+  await page.keyboard.press('Escape');
+  await find(page, '3,235');
+  await expect(page.locator('.notice')).toContainText('No files are ticked');
+
+  await openFileList(page);
+  await fileItem(page, 'workpapers.xlsx').getByRole('checkbox').check();
+  await expect(picker(page)).toContainText('workpapers.xlsx');
+  await page.keyboard.press('Escape');
+  await page.getByLabel('Rounding').selectOption('exact');
+  await find(page, '3,234.56');
+  await expect(page.locator('.result-row')).toHaveCount(2); // Interest!D9 and Summary!B3; the 1099-INT isn't ticked
+  for (const text of await page.locator('.result-row').allInnerTexts()) expect(text).toContain('workpapers.xlsx');
+  await expect(page.locator('.search-row').first()).toContainText('in workpapers.xlsx');
+
+  await openFileList(page);
+  await fileItem(page, '1099-INT.pdf').getByRole('checkbox').check();
+  await expect(picker(page)).toContainText('2 of 4 files');
+  await page.screenshot({ path: path.join(SHOTS, '14-file-list.png') });
+  await panel.getByRole('button', { name: 'Select all' }).click();
+  await expect(picker(page)).toContainText('All files');
+  await page.keyboard.press('Escape');
+  await find(page, '3,234.56'); // the same number, more files: a new version
+  await expect(page.locator('.result-row')).toHaveCount(3);
+  await expect(page.locator('.version-bar')).toContainText('Version 2');
+
+  // "All files" includes files added later; a file ticked off by hand stays off.
+  await page.locator('#file-input').setInputFiles([path.join(FIX, '1040 draft.pdf')]);
+  await filesRead(page, 5);
+  await expect(picker(page)).toContainText('All files');
+  await openFileList(page);
+  await fileItem(page, 'W-2.pdf').getByRole('checkbox').uncheck();
+  await expect(picker(page)).toContainText('4 of 5 files');
+  await fileItem(page, 'W-2.pdf').getByRole('button', { name: 'Remove W-2.pdf' }).click();
+  await expect(panel.locator('.file-item')).toHaveCount(4);
 });
 
 test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to whole dollars', async ({ page }) => {
@@ -156,7 +210,7 @@ test('several numbers start several searches; a repeat just shows the existing o
   await expect(page.locator('.result-row').first()).toContainText('W-2.pdf');
 });
 
-test('the bar grammar: a range, sums:, ±, neg, and in:', async ({ page }) => {
+test('the bar grammar: a range, sums:, ±, neg, and in: with file names', async ({ page }) => {
   await open(page, SOURCES);
   await find(page, '3,200..3,300');
   await expect(page.locator('.search-row .target').first()).toContainText('3,200..3,300');
@@ -167,12 +221,15 @@ test('the bar grammar: a range, sums:, ±, neg, and in:', async ({ page }) => {
   await expect(page.locator('.search-row').first()).toContainText('sums of up to 2, across files · exact · negatives');
   await expect(page.locator('.combo').first()).toContainText('= 3,234.56');
 
-  await makeGroup(page, 'Source docs', ['1099-INT.pdf']);
-  await find(page, '85,000 in:Source');
-  await expect(page.locator('.search-row').first()).toContainText('in Source docs');
+  await find(page, '85,000 in:1099-INT'); // a file name, without its extension
+  await expect(page.locator('.search-row').first()).toContainText('in 1099-INT.pdf');
   await expect(page.locator('.not-found')).toBeVisible();
-  await find(page, '85,000 in:Nowhere');
-  await expect(page.locator('.notice')).toContainText('No group is called "Nowhere"');
+  await find(page, '85,000 in:1099'); // the start of a name: both 1099s
+  await expect(page.locator('.search-row').first()).toContainText('in 1099-INT.pdf and 1099-DIV.pdf');
+  await page.locator('#find-input').fill('85,000 in:Nowhere');
+  await expect(page.locator('.query-echo')).toContainText('No file is called “Nowhere”');
+  await page.locator('#find-input').press('Enter');
+  await expect(page.locator('.notice')).toContainText('No file is called “Nowhere”');
 });
 
 test('the bar grammar: "quotes", ~close, \'text, and +- becomes ±', async ({ page }) => {
@@ -240,32 +297,18 @@ test('sums show as an equation that opens into the full breakdown, with −( ) f
   await page.screenshot({ path: path.join(SHOTS, '04-sums.png') });
 });
 
-test('the search area keeps its state between pages; an empty bar shows the history or a prompt', async ({ page }) => {
+test('an empty bar shows the history or a prompt, centred in the column', async ({ page }) => {
   await page.goto(APP);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', /^data:image\/svg\+xml/); // the tab icon is the title's icon
-  await tab(page, 'Find').click();
   const prompt = page.locator('.find-main > .prompt');
   await expect(prompt.locator('.add-files-prompt')).toBeVisible();
   await expect(prompt).toHaveCSS('justify-content', 'center'); // prompts sit in the middle of the column
   await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
-  await tab(page, 'Files').click(); // the file list (and its "Reading…" state) lives on the Files view
-  await expect(page.locator('.file-row', { hasText: 'W-2.pdf' })).toBeVisible();
-  await expect(page.getByText('Reading…')).toHaveCount(0);
-  await tab(page, 'Find').click();
+  await filesRead(page, 1);
   await expect(page.locator('.add-files-prompt')).toHaveCount(0);
   await expect(page.locator('.main-empty')).toContainText('Type a number');
   await find(page, '85,000');
   await expect(page.locator('.results')).toBeVisible();
-
-  // Switching pages and coming back (by the step or the title) keeps the loaded search.
-  await tab(page, 'Groups').click();
-  await tab(page, 'Find').click();
-  await expect(page.locator('.results')).toBeVisible();
-  await expect(page.locator('#find-input')).toHaveValue('85,000');
-  await tab(page, 'Files').click();
-  await page.locator('.brand').click();
-  await expect(page.locator('.results')).toBeVisible();
-  await expect(page.locator('#find-input')).toHaveValue('85,000');
 
   // An empty bar: the history stays, nothing is selected, and the prompt is centred under it.
   await page.locator('#find-input').fill('');
@@ -382,8 +425,6 @@ test('time limit: a pill for sums, a note when a search runs out of time, and a 
 
 test('a big search is flagged before it runs, with one-click ways to narrow it', async ({ page }) => {
   await open(page, [...SOURCES, ...RETURN]);
-  await makeGroup(page, 'Source docs', SOURCES);
-  await tab(page, 'Find').click();
   await page.locator('#find-input').fill('90,235');
   const note = page.locator('.size-note');
   await expect(note).toHaveCount(0); // "to number": nothing to warn about
@@ -392,7 +433,7 @@ test('a big search is flagged before it runs, with one-click ways to narrow it',
   await expect(note).toContainText('Big search');
   await expect(note).toContainText('longer than a lifetime');
   await expect(note).toContainText('by coincidence');
-  await expect(note.getByRole('button', { name: /^In Source docs · \d+ numbers$/ })).toBeVisible();
+  await expect(note).toContainText('tick fewer files');
   await page.screenshot({ path: path.join(SHOTS, '13-size-note.png') });
 
   await note.getByRole('button', { name: 'Sums of up to 3' }).click();
@@ -524,7 +565,7 @@ test('the side pane can be resized by dragging the splitter, for this session on
   expect(after).toBeGreaterThan(before + 100);
   await page.reload();
   await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
-  await tab(page, 'Find').click();
+  await filesRead(page, 1);
   expect(Math.abs((await pane.boundingBox())!.width - before)).toBeLessThan(4); // back to the default: not remembered
 });
 
@@ -561,25 +602,29 @@ test('hovering a result marks the same number everywhere', async ({ page }) => {
   await expect(page.locator('.result-row.linked')).toHaveCount(0);
 });
 
-test('check: looks up every number in a group against another', async ({ page }) => {
+test('check: looks up every number in some files against the other files', async ({ page }) => {
   await open(page, [...SOURCES, ...RETURN]);
-  await makeGroup(page, 'Source docs', SOURCES);
-  await makeGroup(page, '2025 return', RETURN);
-  // The card's button puts check:"2025 return" in the bar and picks the other group to look in.
-  await page.locator('.group-card', { hasText: '2025 return' }).getByRole('button', { name: 'Check every number…' }).click();
-  await expect(tab(page, 'Find')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('#find-input')).toHaveValue('check:"2025 return"');
+  // The file list's check button puts check:"file" in the bar; checking a second file adds it.
+  await openFileList(page);
+  await page.getByRole('button', { name: 'Check every number in 1040 draft.pdf' }).click();
+  await expect(page.locator('.file-panel')).toHaveCount(0);
+  await expect(page.locator('#find-input')).toHaveValue('check:"1040 draft.pdf"');
   await expect(page.locator('#find-input')).toBeFocused();
+  await openFileList(page);
+  await expect(fileItem(page, '1040 draft.pdf')).toContainText('being checked');
+  await expect(fileItem(page, '1040 draft.pdf').getByRole('checkbox')).toBeDisabled();
+  await page.getByRole('button', { name: 'Check every number in Schedule B.pdf' }).click();
+  await expect(page.locator('#find-input')).toHaveValue('check:"1040 draft.pdf" check:"Schedule B.pdf"');
   await expect(page.locator('.searchbar .where .sentence')).toHaveText('against');
-  await expect(page.locator('.searchbar .where .pick-text')).toContainText('Source docs');
-  await expect(page.locator('.query-echo')).toContainText('Every number in 2025 return will be looked up against Source docs');
-  await page.getByLabel('Match').selectOption('upto');
+  await expect(picker(page)).toContainText('The other files');
+  await expect(page.locator('.query-echo')).toContainText('Every number in 1040 draft.pdf and Schedule B.pdf will be looked up in the other 4 files');
+  await page.getByLabel('Match', { exact: true }).selectOption('upto');
   await page.getByLabel('Most numbers in a sum').fill('3');
   await page.getByRole('button', { name: 'Search' }).click();
 
   await expect(page.locator('.progress-card')).toContainText('Checked', { timeout: 60_000 });
-  await expect(page.locator('.search-row').first()).toContainText('Every number in');
-  await expect(page.locator('#find-input')).toHaveValue('check:"2025 return"'); // the query stays
+  await expect(page.locator('.search-row').first()).toContainText('1040 draft.pdf and Schedule B.pdf');
+  await expect(page.locator('#find-input')).toHaveValue('check:"1040 draft.pdf" check:"Schedule B.pdf"'); // the query stays
   const rows = page.locator('.tieout tbody tr');
   await expect(rows.first()).toContainText('Not found');
   const text = (await rows.allInnerTexts()).join('\n');
@@ -601,6 +646,13 @@ test('check: looks up every number in a group against another', async ({ page })
   const saved = path.join(SHOTS, 'tieout.xlsx');
   await download.saveAs(saved);
   expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
+
+  // Typed by hand, with the start of a name, and with fewer files ticked to look in.
+  await openFileList(page);
+  await fileItem(page, 'workpapers.xlsx').getByRole('checkbox').uncheck();
+  await page.keyboard.press('Escape');
+  await page.locator('#find-input').fill('check:1040 check:schedule');
+  await expect(page.locator('.query-echo')).toContainText('will be looked up in 3 files');
 
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.screenshot({ path: path.join(SHOTS, '08-check-dark.png') });
@@ -641,18 +693,22 @@ test('the browser storage APIs are turned off in the page, and in frames', async
 test('after a full session, the browser holds nothing, and reloading starts from scratch', async ({ page, context }) => {
   test.skip(!!process.env.NF_URL, 'reads storage through a page from disk');
   await open(page, [...SOURCES, ...RETURN]);
-  await page.getByRole('button', { name: 'Rename W-2.pdf' }).click();
+  const panel = await openFileList(page);
+  await panel.getByRole('button', { name: 'Rename W-2.pdf' }).click();
+  // No form field lets the browser keep what was typed (checked with the file list and a short-name box open).
+  const remembered = await page.locator('input, select, textarea').evaluateAll(els =>
+    els.filter(e => e.getAttribute('autocomplete') !== 'off').map(e => e.outerHTML.slice(0, 80)));
+  expect(remembered).toEqual([]);
   await page.getByLabel('Short name for W-2.pdf').fill('W2');
   await page.getByLabel('Short name for W-2.pdf').press('Enter');
-  await makeGroup(page, 'Source docs', SOURCES);
-  await makeGroup(page, '2025 return', RETURN);
+  await fileItem(page, 'workpapers.xlsx').getByRole('checkbox').uncheck();
+  await page.keyboard.press('Escape');
   await page.locator('.theme-toggle').click();
-  await tab(page, 'Find').click();
   await find(page, '3,235');
   await expect(page.locator('.result-row').first()).toBeVisible();
   await page.getByLabel('Match', { exact: true }).selectOption('upto');
   await find(page, '90,235 -hours');
-  await find(page, 'check:"2025 return" in:Source');
+  await find(page, 'check:1040 check:schedule');
   await expect(page.locator('.progress-card')).toContainText('Checked', { timeout: 60_000 });
   const handle = (await page.locator('.splitter').boundingBox())!;
   await page.mouse.move(handle.x + 4, handle.y + 200);
@@ -661,25 +717,14 @@ test('after a full session, the browser holds nothing, and reloading starts from
   await page.mouse.up();
   await page.locator('#find-input').fill('9,120 draft text');
 
-  // No form field lets the browser keep what was typed.
-  for (const view of ['Files', 'Groups', 'Find']) {
-    await tab(page, view).click();
-    const remembered = await page.locator('input, select, textarea').evaluateAll(els =>
-      els.filter(e => e.getAttribute('autocomplete') !== 'off').map(e => e.outerHTML.slice(0, 80)));
-    expect(remembered, `${view} view`).toEqual([]);
-  }
-
   expect(await browserStorage(page)).toEqual(NOTHING);
   expect(await context.cookies()).toEqual([]);
 
   await page.goto(APP);
-  await expect(tab(page, 'Files')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.file-row')).toHaveCount(0);
-  await expect(page.locator('.dropzone')).toBeVisible();
-  await expect(tab(page, 'Groups').locator('.count')).toHaveText('0');
+  await expect(picker(page)).toHaveAttribute('data-files', '0');
+  await expect(picker(page)).toContainText('No files yet');
   await expect(page.locator('#find-input')).toHaveValue('');
   expect(await page.evaluate(() => document.documentElement.dataset.theme ?? 'system')).toBe('system');
-  await tab(page, 'Find').click();
   await expect(page.locator('.search-row')).toHaveCount(0);
   await expect(page.locator('.add-files-prompt')).toBeVisible();
 });
@@ -688,7 +733,7 @@ test('what older versions saved is deleted when the page opens, and nothing else
   test.skip(!!process.env.NF_URL, 'seeds storage through a page from disk');
   await page.goto(PROBE);
   await page.evaluate(async () => {
-    localStorage.setItem('number-finder:setup:v4', JSON.stringify({ groups: [{ id: 'g', name: 'Client Alpha', color: 0, members: [] }] }));
+    localStorage.setItem('number-finder:setup:v4', JSON.stringify({ groups: [{ id: 'g', name: 'Client Alpha', color: 0, members: [] }], runs: [{ kind: 'search', target: 3235 }] }));
     localStorage.setItem('number-finder:theme', 'dark');
     localStorage.setItem('number-finder:pane', '700');
     localStorage.setItem('another-app:settings', 'kept');
@@ -701,7 +746,8 @@ test('what older versions saved is deleted when the page opens, and nothing else
   });
 
   await page.goto(APP);
-  await expect(tab(page, 'Groups').locator('.count')).toHaveText('0');
+  await expect(picker(page)).toHaveAttribute('data-files', '0');
+  await expect(page.locator('.search-row')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.dataset.theme ?? 'system')).toBe('system');
   await page.waitForTimeout(300); // the old database is deleted in the background
 
