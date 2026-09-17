@@ -1,3 +1,4 @@
+import './lib/no-storage'; // first: turns the browser's storage off before anything else runs
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import interLatin from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url';

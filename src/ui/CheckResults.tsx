@@ -112,10 +112,7 @@ export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boole
       </div>
       <p className="hint">{settingsText}{skipped && ` · ${skipped}`}</p>
 
-      {run.status === 'idle' ? (
-        <p className="muted pad">This check is from an earlier session. Add its files and press Run in the list above.</p>
-      ) : (
-        <>
+      <>
           <div className="card progress-card">
             <div className="line">
               {run.status === 'running'
@@ -165,8 +162,7 @@ export function CheckResults({ run, readOnly }: { run: CheckRun; readOnly: boole
               </tbody>
             </table>
           </div>
-        </>
-      )}
+      </>
     </section>
   );
 }

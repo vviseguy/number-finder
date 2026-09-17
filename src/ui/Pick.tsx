@@ -19,7 +19,7 @@ export function Pick({ value, options, onChange, label, className, children }: {
       <span className="pick-text" aria-hidden>{cur?.short ?? cur?.label}</span>
       {children}
       <IconChevronDown size={12} stroke={2} className="pick-chev" aria-hidden />
-      <select value={value} aria-label={label} onChange={e => onChange(e.target.value)}>
+      <select autoComplete="off" value={value} aria-label={label} onChange={e => onChange(e.target.value)}>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </span>

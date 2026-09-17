@@ -1,68 +1,47 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconAlertTriangle, IconDeviceFloppy, IconDownload, IconEye, IconFileImport, IconFolder, IconFolderOpen, IconLoader2, IconPencil, IconRefresh, IconUpload, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconDownload, IconEye, IconFolder, IconFolderOpen, IconLoader2, IconPencil, IconRefresh, IconUpload, IconX } from '@tabler/icons-react';
 import {
-  addMember, fileLabel, forgetFolder, groupsOfFile, openFolder, removeFile, reopenFolder, saveSetupFile, setNick, showPreview, useAppState,
+  addMember, fileLabel, groupsOfFile, openFolder, removeFile, rereadFolder, setNick, showPreview, useAppState,
   type FileEntry, type FolderState,
 } from '../state/store';
 import { canOpenFolder } from '../lib/folder';
 import { fileMeta, plural } from '../lib/format';
 import { FileIcon, GroupTag, kindFromName } from './common';
-import { chooseFiles, chooseSetup } from './FindBar';
+import { chooseFiles } from './FindBar';
 import { Preview } from './Preview';
 import { Splitter } from './Splitter';
 
 /** Served from a website (GitHub Pages) rather than opened from disk. */
 const hosted = typeof location !== 'undefined' && location.protocol.startsWith('http');
 
-/** "Open folder…", "Save setup", "Load setup…" — the ways to bring things back next time. */
-export function SetupButtons({ compact }: { compact?: boolean }) {
+/** More ways to add files: a whole folder (Edge, Chrome), and on the website, the page itself to use offline. */
+export function AddButtons() {
   return (
-    <span className="line setup-buttons">
+    <span className="line add-buttons">
       {hosted && (
         <a className="btn sm" href="numberfinder.html" download="numberfinder.html" title="Save this page as one file: double-click it to use Number finder offline, with nothing to install">
           <IconDownload size={13} aria-hidden /> Download for offline use
         </a>
       )}
       {canOpenFolder && (
-        <button type="button" className="btn sm" title="Read every PDF, Excel, and CSV file in a folder (and its subfolders), and remember the folder for next time" onClick={() => void openFolder()}>
+        <button type="button" className="btn sm" title="Read every PDF, Excel, and CSV file in a folder and its subfolders (for this session only)" onClick={() => void openFolder()}>
           <IconFolderOpen size={13} aria-hidden /> Open folder…
         </button>
       )}
-      {!compact && (
-        <button type="button" className="btn sm" title="Save the groups, short names, options, and searches to a file (not the documents)" onClick={saveSetupFile}>
-          <IconDeviceFloppy size={13} aria-hidden /> Save setup
-        </button>
-      )}
-      <button type="button" className="btn sm" title="Load a saved setup file (or drop it anywhere on the page)" onClick={chooseSetup}>
-        <IconFileImport size={13} aria-hidden /> Load setup…
-      </button>
     </span>
   );
 }
 
-/** The remembered folder: reopen it, read it again, or forget it. */
+/** The folder opened this session, and a way to read it again for new or changed files. */
 export function FolderLine({ folder }: { folder: FolderState }) {
-  if (folder.status === 'needs-click') {
-    return (
-      <div className="folder-card">
-        <IconFolder size={16} aria-hidden />
-        <span>Your files last came from the folder <b>{folder.name}</b>.</span>
-        <button type="button" className="btn sm primary" onClick={() => void reopenFolder()}>Reopen folder</button>
-        <button type="button" className="btn sm ghost" onClick={() => void forgetFolder()}>Forget it</button>
-      </div>
-    );
-  }
   return (
     <p className="hint folder-line">
       <IconFolder size={13} aria-hidden />
       {folder.status === 'reading' && <span>Reading the folder <b>{folder.name}</b>…</span>}
-      {folder.status === 'ready' && <span>Files from the folder <b>{folder.name}</b>; it opens again next time.</span>}
+      {folder.status === 'ready' && <span>Files from the folder <b>{folder.name}</b>.</span>}
       {folder.status === 'gone' && <span>Couldn't read the folder <b>{folder.name}</b>. Was it moved or renamed?</span>}
       {folder.status !== 'reading' && (
-        <>
-          <button type="button" className="link" onClick={() => void reopenFolder()}><IconRefresh size={11} aria-hidden /> Read again</button>
-          <button type="button" className="link" onClick={() => void forgetFolder()}>Forget folder</button>
-        </>
+        <button type="button" className="link" onClick={() => void rereadFolder()}><IconRefresh size={11} aria-hidden /> Read again</button>
       )}
     </p>
   );
@@ -84,7 +63,7 @@ export function FilesView() {
           <span>Drop your tax documents here</span>
           <span className="hint">PDFs, Excel workbooks, and CSV files. They're read inside this page and never uploaded. Click to choose files.</span>
         </button>
-        <div className="line center"><SetupButtons compact /></div>
+        <div className="line center"><AddButtons /></div>
       </div>
     );
   }
@@ -94,7 +73,7 @@ export function FilesView() {
       <main className="main files-main">
         <div className="line">
           <h2 className="view-title">Files <span className="count">{plural(s.files.length, 'file')}</span></h2>
-          <span className="push"><SetupButtons /></span>
+          <span className="push"><AddButtons /></span>
         </div>
         {s.folder && <FolderLine folder={s.folder} />}
         <div className="files-table" role="table">
@@ -111,7 +90,7 @@ export function FilesView() {
                 <FileIcon kind={kindFromName(m.name)} />
                 <span className="file-name">{s.nicks[m.key] || m.name}</span>
               </span>
-              <span className="meta" role="cell">Not added yet · drop it in to restore its groups</span>
+              <span className="meta" role="cell">Removed · drop it in again to put it back in its groups</span>
               <span role="cell">{groupsOfFile(s, m.key).map(g => <GroupTag key={g.id} group={g} />)}</span>
               <span role="cell" />
             </div>
@@ -149,7 +128,7 @@ function FileRow({ file: f, selected }: { file: FileEntry; selected: boolean }) 
         <FileIcon kind={f.parsed?.kind ?? kindFromName(f.name)} />
         <span className="file-names">
           {editing ? (
-            <input
+            <input autoComplete="off"
               ref={input}
               className="nick-input"
               defaultValue={fileLabel(f)}
@@ -181,7 +160,7 @@ function FileRow({ file: f, selected }: { file: FileEntry; selected: boolean }) 
       <span className="groups-cell" role="cell" onClick={e => e.stopPropagation()}>
         {groups.map(g => <GroupTag key={g.id} group={g} />)}
         {addable.length > 0 && (
-          <select className="add-to-group" value="" aria-label={`Add ${fileLabel(f)} to a group`} onChange={e => { if (e.target.value) addMember(e.target.value, f); }}>
+          <select autoComplete="off" className="add-to-group" value="" aria-label={`Add ${fileLabel(f)} to a group`} onChange={e => { if (e.target.value) addMember(e.target.value, f); }}>
             <option value="">{groups.length ? '+ group…' : '+ Add to group…'}</option>
             {addable.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>

@@ -1,12 +1,43 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // The built file from disk, or a live copy: NF_URL=https://vviseguy.github.io/number-finder/ npx playwright test
 const APP = process.env.NF_URL ?? `file:///${path.resolve('dist/numberfinder.html').replace(/\\/g, '/')}`;
 const FIX = path.resolve('fixtures');
 const SHOTS = path.resolve('test-results/shots');
 mkdirSync(SHOTS, { recursive: true });
+
+// A blank page from disk. Pages opened from disk share the browser's storage, so this page can read whatever
+// numberfinder.html would have left behind. (Against a website copy, NF_URL, these checks are skipped.)
+const PROBE_FILE = path.resolve('test-results/probe/storage-probe.html');
+mkdirSync(path.dirname(PROBE_FILE), { recursive: true });
+writeFileSync(PROBE_FILE, '<!doctype html><title>storage probe</title><p>storage probe</p>');
+const PROBE = `file:///${PROBE_FILE.replace(/\\/g, '/')}`;
+
+/** Everything the browser holds for pages from disk (and this tab's session storage). */
+async function browserStorage(page: Page) {
+  await page.goto(PROBE);
+  return page.evaluate(async () => {
+    const opfs: string[] = [];
+    try {
+      const root = await navigator.storage.getDirectory() as unknown as { keys(): AsyncIterable<string> };
+      for await (const name of root.keys()) opfs.push(name);
+    } catch (e) {
+      if ((e as Error).name !== 'SecurityError') opfs.push(`error: ${(e as Error).name}`); // SecurityError: not available to pages from disk, so nothing can be there
+    }
+    return {
+      localStorage: Object.keys(localStorage),
+      sessionStorage: Object.keys(sessionStorage),
+      indexedDB: (await indexedDB.databases()).map(d => d.name),
+      caches: 'caches' in self ? await caches.keys().catch(() => []) : [],
+      opfs,
+      cookie: document.cookie,
+      windowName: window.name,
+    };
+  });
+}
+const NOTHING = { localStorage: [], sessionStorage: [], indexedDB: [], caches: [], opfs: [], cookie: '', windowName: '' };
 
 const SOURCES = ['W-2.pdf', '1099-INT.pdf', '1099-DIV.pdf', 'workpapers.xlsx'];
 const RETURN = ['1040 draft.pdf', 'Schedule B.pdf'];
@@ -54,7 +85,7 @@ test('the website offers the page as a download; the file on disk does not', asy
   expect(readFileSync(saved, 'utf8')).toContain("default-src 'none'");
 });
 
-test('the three steps are the navigation, and the theme can be pinned', async ({ page }) => {
+test('the three steps are the navigation, and the theme can be pinned for the session', async ({ page }) => {
   await open(page, ['W-2.pdf']);
   await expect(tab(page, 'Files')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('.files-table .file-row')).toHaveCount(1);
@@ -75,13 +106,14 @@ test('the three steps are the navigation, and the theme can be pinned', async ({
   await page.locator('.theme-toggle').click();
   expect(await theme()).toBe('dark');
   await page.screenshot({ path: path.join(SHOTS, '02-dark-pinned.png') });
-  await page.reload();
-  expect(await theme()).toBe('dark');
   await page.locator('.theme-toggle').click();
   expect(await theme()).toBe('system');
+  await page.locator('.theme-toggle').click();
+  await page.reload();
+  expect(await theme()).toBe('system'); // not remembered
 });
 
-test('a file can be given a short name that is used everywhere and remembered', async ({ page }) => {
+test('a file can be given a short name that is used everywhere, for this session only', async ({ page }) => {
   await open(page, ['W-2.pdf']);
   await page.getByRole('button', { name: 'Rename W-2.pdf' }).click();
   const input = page.getByLabel('Short name for W-2.pdf');
@@ -93,7 +125,9 @@ test('a file can be given a short name that is used everywhere and remembered', 
   await expect(page.locator('.result-row').first()).toContainText('W2 · page 1');
   await page.reload();
   await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
-  await expect(page.locator('.file-row').first()).toContainText('W2');
+  await expect(page.locator('.file-row').first()).toContainText('W-2.pdf');
+  await expect(page.locator('.file-row').first()).not.toContainText('W2 '); // not remembered
+  await expect(page.locator('.file-name').first()).toHaveText('W-2.pdf');
 });
 
 test('exact lookup: 3,235 on the return is the 1099-INT interest, rounded to whole dollars', async ({ page }) => {
@@ -425,43 +459,6 @@ test('the option pills are one dropdown each, with the sum size inside the Match
   expect((await negatives.boundingBox())!.width).toBeLessThan(130);
 });
 
-test('the setup can be saved to a file and loaded back, by button or by dropping it', async ({ page }) => {
-  await open(page, SOURCES);
-  await makeGroup(page, 'Source docs', ['W-2.pdf', '1099-INT.pdf']);
-  await find(page, '85,000 -hours');
-  await tab(page, 'Files').click();
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save setup' }).click()]);
-  expect(download.suggestedFilename()).toBe('Number finder setup.json');
-  const saved = path.join(SHOTS, 'setup.json');
-  await download.saveAs(saved);
-
-  // A fresh start: nothing remembered.
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await expect(page.locator('.search-row')).toHaveCount(0);
-  await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
-  await expect(page.locator('.file-row', { hasText: 'W-2.pdf' })).toBeVisible();
-
-  // Load it back: the group and the search come back; the missing file is pointed out.
-  await page.getByRole('button', { name: 'Load setup…' }).click({ trial: true });
-  await page.locator('#setup-input').setInputFiles(saved);
-  await expect(page.locator('.notice')).toContainText('Setup loaded from setup.json: 1 group and 1 search. 1 file still to add.');
-  await expect(page.locator('.file-row.missing', { hasText: '1099-INT.pdf' })).toBeVisible();
-  await tab(page, 'Find').click();
-  await expect(page.locator('.search-row').first()).toContainText('85,000');
-  await expect(page.locator('.search-row').first()).toContainText('skipping “hours”');
-  await expect(page.locator('.search-row .status')).toContainText('Not run yet');
-
-  // Dropped with documents, a setup file is taken as a setup, not a document.
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await page.locator('#file-input').setInputFiles([saved, path.join(FIX, '1099-INT.pdf')]);
-  await expect(page.locator('.notice')).toContainText('Setup loaded');
-  await tab(page, 'Groups').click();
-  await expect(page.locator('.member')).toHaveCount(2);
-  await expect(page.locator('.file-row', { hasText: 'setup.json' })).toHaveCount(0);
-});
-
 test('not found shows the likely typo: 9,120 withheld vs W-2 box 2 9,102.00', async ({ page }) => {
   await open(page, SOURCES);
   await page.getByLabel('Rounding').selectOption('exact');
@@ -513,7 +510,7 @@ test('the same number again is a new version; versions can be viewed and restore
   await expect(page.locator('.search-row')).toHaveCount(2);
 });
 
-test('the side pane can be resized by dragging the splitter', async ({ page }) => {
+test('the side pane can be resized by dragging the splitter, for this session only', async ({ page }) => {
   await open(page, SOURCES);
   await find(page, '85,000');
   const pane = page.locator('.side-pane');
@@ -528,7 +525,7 @@ test('the side pane can be resized by dragging the splitter', async ({ page }) =
   await page.reload();
   await page.locator('#file-input').setInputFiles([path.join(FIX, 'W-2.pdf')]);
   await tab(page, 'Find').click();
-  expect(Math.abs((await pane.boundingBox())!.width - after)).toBeLessThan(4);
+  expect(Math.abs((await pane.boundingBox())!.width - before)).toBeLessThan(4); // back to the default: not remembered
 });
 
 test('filters: -hours keeps hours out of the search', async ({ page }) => {
@@ -609,15 +606,106 @@ test('check: looks up every number in a group against another', async ({ page })
   await page.screenshot({ path: path.join(SHOTS, '08-check-dark.png') });
 });
 
-test('setup is remembered, files are not', async ({ page }) => {
-  await open(page, SOURCES);
+// ---------- nothing is saved: the audit ----------
+
+test('the browser storage APIs are turned off in the page, and in frames', async ({ page }) => {
+  await page.goto(APP);
+  const result = await page.evaluate(() => {
+    const off = (fn: () => unknown) => {
+      try { fn(); return 'allowed'; } catch (e) { return String((e as Error).message).includes('keeps everything in memory') ? 'off' : `other: ${(e as Error).message}`; }
+    };
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    window.name = 'carried over';
+    return {
+      localStorage: off(() => localStorage.length),
+      sessionStorage: off(() => sessionStorage.length),
+      indexedDB: off(() => indexedDB.open('x')),
+      caches: 'caches' in window ? off(() => caches.keys()) : 'off',
+      storage: off(() => navigator.storage.getDirectory()),
+      pushState: off(() => history.pushState(null, '', '#x')),
+      open: off(() => window.open('about:blank')),
+      cookieWrite: off(() => { document.cookie = 'a=1'; }),
+      cookie: document.cookie,
+      windowName: window.name,
+      frameLocalStorage: off(() => frame.contentWindow!.localStorage.length),
+      frameIndexedDB: off(() => frame.contentDocument!.defaultView!.indexedDB.open('y')),
+    };
+  });
+  expect(result).toEqual({
+    localStorage: 'off', sessionStorage: 'off', indexedDB: 'off', caches: 'off', storage: 'off', pushState: 'off', open: 'off',
+    cookieWrite: 'off', cookie: '', windowName: '', frameLocalStorage: 'off', frameIndexedDB: 'off',
+  });
+});
+
+test('after a full session, the browser holds nothing, and reloading starts from scratch', async ({ page, context }) => {
+  test.skip(!!process.env.NF_URL, 'reads storage through a page from disk');
+  await open(page, [...SOURCES, ...RETURN]);
+  await page.getByRole('button', { name: 'Rename W-2.pdf' }).click();
+  await page.getByLabel('Short name for W-2.pdf').fill('W2');
+  await page.getByLabel('Short name for W-2.pdf').press('Enter');
   await makeGroup(page, 'Source docs', SOURCES);
-  await page.reload();
-  await expect(page.locator('.file-row:not(.missing)')).toHaveCount(0);
-  await expect(page.locator('.file-row.missing')).toHaveCount(SOURCES.length);
-  await page.locator('#file-input').setInputFiles(SOURCES.map(f => path.join(FIX, f)));
-  await expect(page.locator('.file-row.missing')).toHaveCount(0);
-  await tab(page, 'Groups').click();
-  await expect(page.locator('.member.missing')).toHaveCount(0);
-  await expect(page.locator('.member')).toHaveCount(SOURCES.length);
+  await makeGroup(page, '2025 return', RETURN);
+  await page.locator('.theme-toggle').click();
+  await tab(page, 'Find').click();
+  await find(page, '3,235');
+  await expect(page.locator('.result-row').first()).toBeVisible();
+  await page.getByLabel('Match', { exact: true }).selectOption('upto');
+  await find(page, '90,235 -hours');
+  await find(page, 'check:"2025 return" in:Source');
+  await expect(page.locator('.progress-card')).toContainText('Checked', { timeout: 60_000 });
+  const handle = (await page.locator('.splitter').boundingBox())!;
+  await page.mouse.move(handle.x + 4, handle.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 120, handle.y + 200, { steps: 6 });
+  await page.mouse.up();
+  await page.locator('#find-input').fill('9,120 draft text');
+
+  // No form field lets the browser keep what was typed.
+  for (const view of ['Files', 'Groups', 'Find']) {
+    await tab(page, view).click();
+    const remembered = await page.locator('input, select, textarea').evaluateAll(els =>
+      els.filter(e => e.getAttribute('autocomplete') !== 'off').map(e => e.outerHTML.slice(0, 80)));
+    expect(remembered, `${view} view`).toEqual([]);
+  }
+
+  expect(await browserStorage(page)).toEqual(NOTHING);
+  expect(await context.cookies()).toEqual([]);
+
+  await page.goto(APP);
+  await expect(tab(page, 'Files')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.file-row')).toHaveCount(0);
+  await expect(page.locator('.dropzone')).toBeVisible();
+  await expect(tab(page, 'Groups').locator('.count')).toHaveText('0');
+  await expect(page.locator('#find-input')).toHaveValue('');
+  expect(await page.evaluate(() => document.documentElement.dataset.theme ?? 'system')).toBe('system');
+  await tab(page, 'Find').click();
+  await expect(page.locator('.search-row')).toHaveCount(0);
+  await expect(page.locator('.add-files-prompt')).toBeVisible();
+});
+
+test('what older versions saved is deleted when the page opens, and nothing else is touched', async ({ page }) => {
+  test.skip(!!process.env.NF_URL, 'seeds storage through a page from disk');
+  await page.goto(PROBE);
+  await page.evaluate(async () => {
+    localStorage.setItem('number-finder:setup:v4', JSON.stringify({ groups: [{ id: 'g', name: 'Client Alpha', color: 0, members: [] }] }));
+    localStorage.setItem('number-finder:theme', 'dark');
+    localStorage.setItem('number-finder:pane', '700');
+    localStorage.setItem('another-app:settings', 'kept');
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('number-finder', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('handles');
+      req.onsuccess = () => { req.result.close(); resolve(); };
+      req.onerror = () => reject(req.error);
+    });
+  });
+
+  await page.goto(APP);
+  await expect(tab(page, 'Groups').locator('.count')).toHaveText('0');
+  expect(await page.evaluate(() => document.documentElement.dataset.theme ?? 'system')).toBe('system');
+  await page.waitForTimeout(300); // the old database is deleted in the background
+
+  const left = await browserStorage(page);
+  expect(left.localStorage).toEqual(['another-app:settings']);
+  expect(left.indexedDB).toEqual([]);
 });

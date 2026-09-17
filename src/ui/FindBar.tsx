@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconSearch, IconX } from '@tabler/icons-react';
-import { addFiles, ALL_FILES, clearFindText, groupById, groupByText, groupName, loadSetupFile, setFind, setFindText, submitFind, useAppState } from '../state/store';
+import { addFiles, ALL_FILES, clearFindText, groupById, groupByText, groupName, setFind, setFindText, submitFind, useAppState } from '../state/store';
 import {
   CHECK_SECONDS, DEFAULT_CHECK_SECONDS, MADE_OF_HINT, MAX_SUM_SIZE, MIN_SUM_SIZE, ROUNDING_LABEL, ROUNDING_SHORT, SEARCH_SECONDS, secondsLabel,
 } from '../lib/format';
@@ -11,11 +11,10 @@ import type { Rounding } from '../types';
 import { Pick } from './Pick';
 import { SizeNote } from './Narrow';
 
-const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.json';
+const ACCEPT = '.pdf,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt';
 const MAX_NEGATIVES = 20;
 
 export function chooseFiles() { document.getElementById('file-input')?.click(); }
-export function chooseSetup() { document.getElementById('setup-input')?.click(); }
 
 /** Shown in turn in the empty bar: each one is something you can type. Group names are filled in when there are groups. */
 function hints(groups: string[]): string[] {
@@ -45,7 +44,7 @@ function hints(groups: string[]): string[] {
 /** A small whole-number box inside a pill (the sum size, the most negatives). */
 function CountBox({ value, min, max, label, onChange }: { value: number; min: number; max: number; label: string; onChange: (n: number) => void }) {
   return (
-    <input
+    <input autoComplete="off"
       type="number"
       className="sum-size"
       min={min}
@@ -165,10 +164,9 @@ export function FindBar() {
       <form className="searchbar" onSubmit={e => { e.preventDefault(); submitFind(); }}>
         <div className="query">
           <IconSearch size={18} stroke={1.75} className="query-icon" aria-hidden />
-          <input
+          <input autoComplete="off"
             id="find-input"
             ref={input}
-            autoComplete="off"
             spellCheck={false}
             placeholder={HINTS[hint % HINTS.length]}
             value={s.findText}
@@ -269,20 +267,13 @@ export function FindBar() {
         </span>
       </div>
       <SizeNote />
-      <input
+      <input autoComplete="off"
         id="file-input"
         type="file"
         multiple
         accept={ACCEPT}
         hidden
         onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; if (files.length) void addFiles(files); }}
-      />
-      <input
-        id="setup-input"
-        type="file"
-        accept=".json,application/json"
-        hidden
-        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void loadSetupFile(f); }}
       />
     </section>
   );

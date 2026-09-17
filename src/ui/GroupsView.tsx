@@ -39,7 +39,7 @@ function GroupCard({ group, editing, onEdit }: { group: Group; editing: boolean;
     <div className="group-card">
       <div className="group-head">
         {editing ? (
-          <input
+          <input autoComplete="off"
             ref={nameInput}
             className="group-name-input"
             defaultValue={group.name}
@@ -69,7 +69,7 @@ function GroupCard({ group, editing, onEdit }: { group: Group; editing: boolean;
         return (
           <div key={m.key} className={`member${file ? '' : ' missing'}`}>
             <span className="member-name" title={file ? m.name : `${m.name} isn't added yet`}>{label}</span>
-            <input
+            <input autoComplete="off"
               className={`limit${valid ? '' : ' invalid'}`}
               value={m.limit}
               placeholder="any"
@@ -85,7 +85,7 @@ function GroupCard({ group, editing, onEdit }: { group: Group; editing: boolean;
       })}
 
       {addable.length > 0 && (
-        <select
+        <select autoComplete="off"
           className="add-file"
           value=""
           aria-label={`Add a file to ${group.name}`}

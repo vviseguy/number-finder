@@ -1,4 +1,4 @@
-import { IconCheck, IconHistory, IconListCheck, IconPlayerPlay, IconPlayerStop, IconRefresh, IconX } from '@tabler/icons-react';
+import { IconCheck, IconHistory, IconListCheck, IconPlayerStop, IconRefresh, IconX } from '@tabler/icons-react';
 import {
   clearFinished, groupById, groupName, removeRun, rerunRun, runSummary, selectRun, stopRun, targetText, useAppState, viewVersion,
   type CheckRun, type Run, type SearchRun,
@@ -53,7 +53,7 @@ export function VersionPicker({ run: r }: { run: Run }) {
   return (
     <span className="version-pick" title="Versions of this search">
       <IconHistory size={13} aria-hidden />
-      <select
+      <select autoComplete="off"
         aria-label="Version"
         value={r.viewing === null ? 'current' : String(r.viewing)}
         onChange={e => viewVersion(r.id, e.target.value === 'current' ? null : Number(e.target.value))}
@@ -76,12 +76,7 @@ function Progress({ run }: { run: Run }) {
   );
 }
 
-function RunButton({ id }: { id: string }) {
-  return <button type="button" className="btn sm" onClick={() => rerunRun(id)}><IconPlayerPlay size={12} aria-hidden /> Run</button>;
-}
-
 function SearchStatus({ run: r }: { run: SearchRun }) {
-  if (r.status === 'idle') return <span className="status"><span className="muted">Not run yet</span><RunButton id={r.id} /></span>;
   if (r.status === 'running') {
     const pct = r.progress === null ? `${(r.elapsedMs / 1000).toFixed(1)} s` : `${Math.round(r.progress * 100)}%`;
     return (
@@ -110,7 +105,6 @@ function SearchStatus({ run: r }: { run: SearchRun }) {
 }
 
 function CheckStatus({ run: r }: { run: CheckRun }) {
-  if (r.status === 'idle') return <span className="status"><span className="muted">Not run yet</span><RunButton id={r.id} /></span>;
   const done = r.rows.filter(x => x.status !== 'pending').length;
   if (r.status === 'running') {
     return (

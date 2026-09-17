@@ -12,23 +12,34 @@ Go to **https://vviseguy.github.io/number-finder/**, or double-click **`numberfi
 
 The website is the same single file, published from this private repository on every push to `main` by `.github/workflows/pages.yml`; only the built page is public, not the source. Your documents are still read only inside your browser tab: the same no-network rule applies on the website.
 
-## Your files stay on your computer
+## Nothing is saved
 
-Everything happens inside that browser tab. The page includes a security rule (a Content-Security-Policy) that stops it from making any network connection at all, so documents can't be sent anywhere — you can check the rule at the top of the HTML file.
+Everything Number finder knows lives in the memory of one browser tab: the documents, the numbers read from them, groups, short names, options, searches, results, the theme, and the pane width. Close or reload the tab and all of it is gone; the next visit starts empty. There is no setup file, no remembered folder, and no history between sessions.
 
-Between sessions it remembers your **setup** — group names, which file names belong to each group, files' short names, your searches, the order of results, the pane width, and the theme — but never the files or their contents, and not past versions of searches. Drop the files in again and they slot back into their groups.
+The only things that leave the tab are files you ask for: *Export to Excel* and *CSV* on a group check, and *Download for offline use* on the website. They go to your Downloads folder like any other download.
 
-**Getting the files back without dropping them.** A browser never lets a page read files from disk on its own, so there are two helpers on the Files view:
+**The network.** The page carries a security rule (a Content-Security-Policy, at the top of the HTML file) that blocks requests to anywhere: no scripts, fonts, images, or data are fetched, so neither the page nor a library in it can send a document out. The rule doesn't cover a script that deliberately navigates the tab to another address or opens a WebRTC connection; no code in Number finder does either.
 
-- **Open folder…** (Edge and Chrome) reads every PDF, Excel, and CSV file in a folder and its subfolders, and remembers the folder. Next time, the page reads it again by itself if the browser has kept the permission, and otherwise shows a *Reopen folder* button that takes one click. The folder's handle is kept in the browser's own storage on this computer; the files are read fresh each time and never stored. *Forget folder* drops it.
-- **Save setup** writes `Number finder setup.json` — the groups, short names, options, and searches, not the documents — and **Load setup…** reads one back. Dropping the file anywhere on the page does the same, so a setup can travel with a folder of documents or be handed to someone else.
-- **The two together.** With a folder open, *Save setup* opens the Save dialog in that folder, and a setup file kept there loads with the folder: when the folder is opened or reopened, the newest setup file in it (top level or one folder down) is loaded if it's newer than the setup this computer remembers. An older one is left alone, with a note saying so; *Load setup…* uses it anyway. So the folder becomes the whole job: documents plus setup, ready on any computer.
+### How to audit it
+
+Four independent checks, from reading the code to watching the browser:
+
+1. **The lock.** [`src/lib/no-storage.ts`](src/lib/no-storage.ts) runs before anything else in the page and in each background worker, and turns off every way a page can keep data in the browser: `localStorage`, `sessionStorage`, IndexedDB, the Cache API, cookies, the origin private file system, storage buckets, service workers, `history.pushState`, `window.name`, `window.open`, and writing through file handles. Touching any of them throws an error that says *"…is turned off: Number finder keeps everything in memory and saves nothing in the browser."* It also turns them off inside any frame that's reached through the page.
+2. **The source check.** `npm test` runs [`src/lib/no-storage.test.ts`](src/lib/no-storage.test.ts), which fails if the page or any worker doesn't load the lock first, if any other source file names a storage API, or if any form field lacks `autocomplete="off"` (which keeps the browser from recording what was typed, including in crash-recovery data).
+3. **The browser check.** `npm run e2e` includes three tests in [`e2e/app.spec.ts`](e2e/app.spec.ts): every storage API above is off in the page and in a frame; after a full session (files, short names, groups, theme, searches, a whole-group check, a resized pane, text in the bar) the browser's `localStorage`, `sessionStorage`, IndexedDB, Cache Storage, file system, cookies, and `window.name` are all empty, and a reload starts from scratch; and data saved by older versions is deleted (below). These were checked against a broken build: with the lock taken out, the first test fails, and with one write to storage added, the second fails too.
+4. **By hand, in the page.** Open the browser's developer tools on Number finder. In the Console, `localStorage` or `indexedDB` answers with the "turned off" error. Under Application → Storage, the page's local storage, session storage, IndexedDB, and cookies stay empty however much you use it.
+
+In the built file, the words `localStorage`, `sessionStorage`, and `indexedDB` appear only inside the lock (once for the page and once per worker) and in a read-only check in ExcelJS, the export library, which the lock turns into "not available".
+
+**Data from older versions.** Versions before this one remembered the setup in the browser. When the page opens, it deletes those: every `localStorage` key starting `number-finder:` and the IndexedDB database `number-finder`. Nothing else is read or touched.
+
+**What the browser itself keeps**, outside the page's control: the list of downloads, the folder the file picker last opened, the page's address in your browsing history (no document data is ever in the address), and, for the website, a cached copy of the page itself. A private window keeps none of these after it closes.
 
 ## Using it
 
-The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three views; switching between them keeps whatever is loaded in the search area. The drop target sits at the right of the header, and the search bar under the header is on every view. The sun/moon button at the top right pins light or dark mode (it follows your system until you do); light mode is a warm paper tone rather than pure white. The handle between the results and the pane on the right drags to resize it; the page in the pane scales while you drag and is drawn again once you let go.
+The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three views; switching between them keeps whatever is loaded in the search area. The drop target sits at the right of the header, and the search bar under the header is on every view. The sun/moon button at the top right pins light or dark mode for this visit (each visit starts by following your system); light mode is a warm paper tone rather than pure white. The handle between the results and the pane on the right drags to resize it; the page in the pane scales while you drag and is drawn again once you let go.
 
-1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. Long file names are shortened to what tells them apart: words that appear in every file's name are replaced by `…`, so *Alpha Client 2025 Bank Statement Jan.pdf* shows as `Alpha…Jan.pdf` next to its Beta and February siblings, with the full name underneath and in tooltips. The pencil sets your own short name instead, remembered for next time. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
+1. **Files.** Drop files anywhere on the page, or use *choose files*. Each file shows how many numbers were found; click one to see it on the right. Long file names are shortened to what tells them apart: words that appear in every file's name are replaced by `…`, so *Alpha Client 2025 Bank Statement Jan.pdf* shows as `Alpha…Jan.pdf` next to its Beta and February siblings, with the full name underneath and in tooltips. The pencil sets your own short name instead, for this session. A scanned PDF (an image with no text) is flagged; Number finder can't read scans yet.
 2. **Groups.** A group is a set of files to search in, like *Source docs* or *2025 return*. A file can be in several groups. Each file in a group can have a limit on how many numbers a match may use from it: `1` (at most one), `0-2`, `1-2` (at least one), `2+`, or blank for any. Until you make a group, searches look through all files.
 3. **Find.** Type a number in the search bar (or click any number in a preview) and press Enter; *in* picks the group to look in. The query stays in the bar, and selecting a search in the history loads it back. Under the bar:
    - **Match:** *to number* (where does it appear?), *to sum (Any count)*, *to sum (Up to count)* with a count you set (2 to 20), or *to sum (Specify count)* for exactly that many. Exact matches of the number itself show first, except with a specified count, which leaves single numbers out.
@@ -58,7 +69,7 @@ The three steps in the header, `1 Files → 2 Groups → 3 Find`, are the three 
 
    Words like `in:`, `sums:`, `±`, and `neg` override the pills for that one search. Filters apply before the search, so a skipped number can never be part of a sum.
 
-   **Order.** With several matches, the *Order* picker above the results offers *Best match* (fewest numbers, then the ones mentioning a `'word`, then fewest negatives, then closest), *Closest first*, *By file*, and *Document order*. It's remembered.
+   **Order.** With several matches, the *Order* picker above the results offers *Best match* (fewest numbers, then the ones mentioning a `'word`, then fewest negatives, then closest), *Closest first*, *By file*, and *Document order*.
 
    **Whole group.** Type `check:"2025 return"` in the bar, or press *Check every number…* on the group's card in step 2, which types it for you. The right side then reads *against* `Source docs`: every number in the first group is looked up in the second, with the same Match, Rounding, and filter words. The result is a table of what was found, what's made of several numbers, and what's missing.
 
@@ -102,7 +113,8 @@ npm run build
 | `src/extract/` | Reads PDFs (pdf.js), Excel and CSV (SheetJS): amounts, labels, locations |
 | `src/engine/` | The search: exact lookups, combinations, negatives, per-file limits, nearest number; runs in background workers |
 | `src/lib/query.ts`, `fuzzy.ts`, `rank.ts` | The bar's grammar, the `~word` matcher, and the orders results can be shown in |
-| `src/lib/setupfile.ts`, `folder.ts` | The setup file format; the remembered folder (File System Access API) |
-| `src/state/store.ts` | App state, actions, and what's remembered between sessions |
+| `src/lib/no-storage.ts` | Turns the browser's storage off in the page and every worker (see *Nothing is saved*) |
+| `src/lib/folder.ts` | *Open folder…* (File System Access API), for the current session only |
+| `src/state/store.ts` | App state and actions, all in memory |
 | `src/ui/` | The interface |
 | `e2e/` | Browser tests of the built file |

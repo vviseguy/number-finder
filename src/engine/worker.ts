@@ -7,6 +7,7 @@
 // Work runs in step(30) slices separated by setTimeout(0), so a 'stop' is handled within one slice
 // and answered right away with done 'stopped' plus the matches found so far.
 
+import '../lib/no-storage'; // first: turns the browser's storage off in this worker
 import { createSearch, type Search } from './search';
 import type { EngineEvent, SearchRequest } from '../types';
 

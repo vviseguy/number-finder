@@ -1,12 +1,13 @@
 // App state and actions. One module-level store read by React through useSyncExternalStore.
 //
 // Contracts:
-//   - File bytes live outside the state (fileData) so the state stays small and serializable.
-//   - Groups and nicknames reference files by key ("name|size"), so a re-dropped file slots back in.
-//   - Only SETUP is saved between sessions (groups, nicknames, bar settings, run definitions, pane width,
-//     theme, result order) — never file contents, amounts, or results. The same setup can be saved to a
-//     file and loaded back (lib/setupfile.ts). A folder of documents can be remembered and reopened
-//     (lib/folder.ts, Chromium only); its files are read again, never stored.
+//   - EVERYTHING LIVES IN MEMORY, and nothing is carried from one session to the next: not the files, not
+//     the groups, short names, options, history, theme, pane width, or an opened folder. Every page load
+//     starts from initialState(). lib/no-storage.ts turns the browser's storage off before this module
+//     loads, and lib/no-storage.test.ts fails the build if code here reaches for it.
+//   - File bytes live outside the state (fileData) so the state stays small.
+//   - Groups and nicknames reference files by key ("name|size"), so a file removed and dropped in again
+//     during the same session slots back into its groups.
 //   - The search bar starts runs. Each number typed is its own search; `check:Group` looks up every
 //     number in that group (a check) and the other words are filters. Words like in:, sums:, ±, neg
 //     override the option pills for that run.
@@ -20,26 +21,20 @@ import { ROUNDING_TOLERANCE } from '../types';
 import { extractFile } from '../extract';
 import { SearchPool } from '../engine/pool';
 import { forgetPdf, getPdfjs } from '../lib/pdf';
-import { download } from '../lib/exporter';
-import { canOpenFolder, canPickSaveLocation, folderPermission, forgetFolderHandle, loadFolderHandle, pickFolder, readFolder, saveFolderHandle, saveTextAs, type DirHandle } from '../lib/folder';
-import { isSetupText, parseSetup, sameSetup, serializeSetup, SETUP_FILE_NAME, type SavedRun, type SavedSetup } from '../lib/setupfile';
+import { canOpenFolder, pickFolder, readFolder, type DirHandle } from '../lib/folder';
 import {
   CHECK_SECONDS, DEFAULT_CHECK_SECONDS, DEFAULT_SEARCH_SECONDS, formatMoney, madeOfLabel, negativesLabel, parseLimit, plural, roundingPhrase, secondsLabel, uid,
 } from '../lib/format';
-import { checkToken, hasTerms, normalizeTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, termText, type Query, type Terms } from '../lib/query';
-import { DEFAULT_GROUPING, GROUPING_SHORT, groupingOf, SORT_LABEL, sortMatches, type Grouping, type ItemInfo, type ResultSort } from '../lib/rank';
+import { checkToken, hasTerms, parseQuery, passesTerms, serializeTerms, termsPhrase, termText, type Query, type Terms } from '../lib/query';
+import { DEFAULT_GROUPING, GROUPING_SHORT, groupingOf, sortMatches, type Grouping, type ItemInfo, type ResultSort } from '../lib/rank';
 import { shortNames } from '../lib/names';
 
-// These are read while this module loads (loadSetup below), so they must be declared before that line.
+// These are read while this module loads (initialState below), so they must be declared before that line.
 export const ALL_FILES = '__all__';
-const STORAGE_KEY = 'number-finder:setup:v4';
-const THEME_KEY = 'number-finder:theme';
-const PANE_KEY = 'number-finder:pane';
 const GROUP_COLORS = 6;
 const READ_TIMEOUT_MS = 60_000;
 export const MIN_PANE = 320;
-/** When the setup (groups, short names, options, searches) last changed; a folder's setup file loads only if newer. */
-let setupAt = 0;
+const DEFAULT_PANE = 520;
 
 // ---------- state shape ----------
 
@@ -48,7 +43,7 @@ export type Theme = 'system' | 'light' | 'dark';
 
 export interface FileEntry {
   id: string;
-  /** Identity that survives sessions: "name|size". */
+  /** Identity that outlasts removing and re-adding the file this session: "name|size". */
   key: string;
   name: string;
   /** Short name shown in the interface; '' means use the file name (shortened automatically). */
@@ -82,7 +77,7 @@ export const checkSecondsOf = (st: FindSettings): number => st.checkSeconds ?? D
 /** "No limit" still needs a number for the engine: a day. */
 const NO_LIMIT_MS = 86_400_000;
 
-type RunStatus = 'idle' | 'running' | 'done' | 'stopped';
+type RunStatus = 'running' | 'done' | 'stopped';
 
 /** A frozen copy of a run as it was before a newer version replaced it. */
 export interface Version { at: number; run: Run }
@@ -133,11 +128,8 @@ export type Run = SearchRun | CheckRun;
 
 export interface Notice { kind: 'info' | 'warn' | 'error'; text: string; action?: { label: string; run: () => void } }
 
-/**
- * The remembered folder: 'ready' once its files were read this session, 'needs-click' when the browser
- * wants a fresh OK before it can be read, 'gone' when it couldn't be read (moved or renamed?).
- */
-export interface FolderState { name: string; status: 'ready' | 'needs-click' | 'reading' | 'gone' }
+/** The folder opened this session: being read, read, or unreadable (moved or renamed?). Forgotten with the tab. */
+export interface FolderState { name: string; status: 'ready' | 'reading' | 'gone' }
 
 export interface AppState {
   view: View;
@@ -168,8 +160,7 @@ export interface AppState {
 
 export const fileData = new Map<string, ArrayBuffer>();
 const listeners = new Set<() => void>();
-let persistTimer: ReturnType<typeof setTimeout> | undefined;
-let state: AppState = loadSetup();
+let state: AppState = initialState();
 let emitQueued = false;
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 let pool: SearchPool | null = null;
@@ -184,16 +175,10 @@ function emit() {
   queueMicrotask(() => { emitQueued = false; for (const l of listeners) l(); });
 }
 
-const runSig = (runs: Run[]) => runs.map(r => `${r.id}:${r.version}`).join();
-
 function set(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
   const prev = state;
   state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
   if (state.files !== prev.files) refreshLabels();
-  if (state.groups !== prev.groups || state.nicks !== prev.nicks || state.find !== prev.find || state.resultSort !== prev.resultSort
-    || (state.runs !== prev.runs && runSig(state.runs) !== runSig(prev.runs))) setupAt = Date.now();
-  clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => { persistTimer = undefined; saveSetup(); }, 300);
   emit();
 }
 
@@ -206,156 +191,24 @@ export function useAppState(): AppState {
   );
 }
 
-// ---------- persistence (setup only) ----------
+// ---------- the starting state: the same on every page load ----------
 
-// Function declarations, not consts: loadSetup() runs at module load, before consts below it exist.
+// Function declarations, not consts: initialState() runs at module load, before consts below it exist.
 function defaultFind(): FindSettings {
   return { groupId: ALL_FILES, maxCount: 1, rounding: 'dollar', allowFlips: false, grouping: DEFAULT_GROUPING };
 }
 
-function restoreRun(r: SavedRun): Run {
-  const base = { settings: r.settings, terms: normalizeTerms(r.terms), status: 'idle' as const, startedAt: 0, at: 0, elapsedMs: 0, version: 1, history: [], viewing: null };
-  return r.kind === 'check'
-    ? { ...base, kind: 'check', id: uid('c'), checkGroupId: r.checkGroupId, rows: [], skippedZeros: 0, skippedByTerms: 0, selectedAmountId: null }
-    : { ...base, kind: 'search', id: uid('s'), target: r.target, targetDecimals: r.targetDecimals, range: r.range ?? null, originId: null, reason: null, matches: [], progress: null };
-}
-
-function loadTheme(): Theme {
-  try {
-    const t = localStorage.getItem(THEME_KEY);
-    return t === 'light' || t === 'dark' ? t : 'system';
-  } catch (err) {
-    console.warn('Theme not restored', err);
-    return 'system';
-  }
+function initialState(): AppState {
+  return {
+    view: 'files', theme: 'system', paneWidth: DEFAULT_PANE, files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', barFocus: 0,
+    resultSort: 'best', runs: [], selectedRunId: null, previewId: null, notice: null, dragging: false, folder: null,
+  };
 }
 
 function applyTheme(theme: Theme) {
   if (typeof document === 'undefined') return;
   if (theme === 'system') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
-}
-
-function loadPaneWidth(): number {
-  try { const n = Number(localStorage.getItem(PANE_KEY)); return n >= MIN_PANE ? n : 520; } catch { return 520; }
-}
-
-/** The saved shape back into state: what localStorage and a setup file both restore. */
-function setupToState(saved: SavedSetup): Pick<AppState, 'groups' | 'nicks' | 'find' | 'resultSort' | 'runs'> {
-  return {
-    groups: saved.groups ?? [],
-    nicks: saved.nicks ?? {},
-    find: { ...defaultFind(), ...saved.find },
-    resultSort: saved.resultSort && saved.resultSort in SORT_LABEL ? saved.resultSort : 'best',
-    runs: (saved.runs ?? []).map(restoreRun),
-  };
-}
-
-function loadSetup(): AppState {
-  const theme = loadTheme();
-  applyTheme(theme);
-  const base: AppState = {
-    view: 'files', theme, paneWidth: loadPaneWidth(), files: [], nicks: {}, groups: [], find: defaultFind(), findText: '', barFocus: 0, resultSort: 'best',
-    runs: [], selectedRunId: null, previewId: null, notice: null, dragging: false, folder: null,
-  };
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return base;
-    const saved = JSON.parse(raw) as SavedSetup;
-    setupAt = saved.changedAt ?? 0;
-    return { ...base, ...setupToState(saved) };
-  } catch {
-    return base;
-  }
-}
-
-/** The setup as saved: definitions only, never file contents or results. */
-function currentSetup(): SavedSetup {
-  const runs: SavedRun[] = state.runs.slice(0, 30).map(r => (r.kind === 'check'
-    ? { kind: 'check', checkGroupId: r.checkGroupId, settings: r.settings, terms: r.terms }
-    : { kind: 'search', target: r.target, targetDecimals: r.targetDecimals, range: r.range, settings: r.settings, terms: r.terms }));
-  return { groups: state.groups, nicks: state.nicks, find: state.find, resultSort: state.resultSort, runs, folder: state.folder?.name, changedAt: setupAt };
-}
-
-function saveSetup() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentSetup())); } catch { /* storage full or blocked: setup just isn't remembered */ }
-}
-
-/** Replaces groups, short names, options, and searches with a setup; returns what to tell the person. */
-function applySetup(setup: SavedSetup, sourceName: string): string {
-  for (const r of state.runs) stopRun(r.id);
-  set({ ...setupToState(setup), selectedRunId: null, previewId: null });
-  const loaded = new Set(state.files.map(f => f.key));
-  const missing = new Set(state.groups.flatMap(g => g.members).filter(m => !loaded.has(m.key)).map(m => m.key)).size;
-  const what = `${plural(state.groups.length, 'group')} and ${plural(state.runs.length, 'search', 'searches')}`;
-  const where = missing ? ` ${plural(missing, 'file')} still to add${setup.folder ? ` (they came from the folder “${setup.folder}”)` : ''}.` : '';
-  return `Setup loaded from ${sourceName}: ${what}.${where}`;
-}
-
-/**
- * "Save setup": the setup as a file, to keep or hand to someone with the documents. With a remembered
- * folder (and a browser that has the dialog), the Save dialog opens in that folder, so the file lands
- * next to the documents and loads with them next time; otherwise the file is downloaded.
- */
-export async function saveSetupFile() {
-  const text = serializeSetup(currentSetup());
-  if (canPickSaveLocation && state.folder) {
-    try {
-      const h = await loadFolderHandle();
-      if (h) {
-        const name = await saveTextAs(text, SETUP_FILE_NAME, h);
-        if (name) notify('info', `Setup saved as ${name}. Kept in ${h.name}, it loads with the folder next time.`);
-        return;
-      }
-    } catch (err) {
-      console.warn('Save dialog failed; downloading instead', err);
-    }
-  }
-  download(new Blob([text], { type: 'application/json' }), SETUP_FILE_NAME);
-}
-
-/** "Load setup" (or a setup file dropped on the page): replaces groups, short names, options, and searches. */
-export async function loadSetupFile(file: File): Promise<boolean> {
-  let setup: SavedSetup;
-  try { setup = parseSetup(await file.text()).setup; } catch (err) {
-    notify('error', `${file.name}: ${err instanceof Error ? err.message : 'could not be read.'}`);
-    return false;
-  }
-  notify('info', applySetup(setup, file.name));
-  return true;
-}
-
-/**
- * A setup file found in the folder: loaded when it is newer than the current setup (so a file saved from
- * here, or brought by someone else, wins over what this computer remembers, but not the other way round).
- */
-async function loadFolderSetup(files: File[], folderName: string): Promise<string> {
-  let best: { setup: SavedSetup; name: string } | null = null;
-  for (const f of files) {
-    const text = await f.text();
-    if (!isSetupText(text)) continue;
-    try {
-      const { setup } = parseSetup(text);
-      if (!best || (setup.changedAt ?? 0) > (best.setup.changedAt ?? 0)) best = { setup, name: f.name };
-    } catch (err) {
-      console.warn(`${f.name} looks like a setup file but couldn't be read`, err);
-    }
-  }
-  if (!best || sameSetup(best.setup, currentSetup())) return '';
-  if ((best.setup.changedAt ?? 0) > setupAt) return applySetup(best.setup, `${best.name} in ${folderName}`);
-  return `${best.name} in ${folderName} is older than the setup on this computer, so it wasn't loaded (Load setup… uses it anyway).`;
-}
-
-// Saves are debounced; flush the pending one when the page is closed, reloaded, or hidden.
-function flushSetup() {
-  if (persistTimer === undefined) return;
-  clearTimeout(persistTimer);
-  persistTimer = undefined;
-  saveSetup();
-}
-if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', flushSetup);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSetup(); });
 }
 
 // ---------- derived data ----------
@@ -492,14 +345,12 @@ export function setView(view: View) { set({ view }); }
 
 export function setTheme(theme: Theme) {
   applyTheme(theme);
-  try { if (theme === 'system') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, theme); } catch { /* not remembered */ }
   set({ theme });
 }
 
 export function setPaneWidth(px: number) {
   const width = Math.round(Math.max(MIN_PANE, px));
   if (width === state.paneWidth) return;
-  try { localStorage.setItem(PANE_KEY, String(width)); } catch { /* not remembered */ }
   set({ paneWidth: width });
 }
 
@@ -515,11 +366,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-/** Adds documents. A .json file among them is taken as a setup file. Returns how many documents were new. */
-export async function addFiles(all: File[], quietDupes = false): Promise<number> {
-  const setups = all.filter(f => /\.json$/i.test(f.name));
-  for (const f of setups) await loadSetupFile(f);
-  const list = all.filter(f => !setups.includes(f));
+/** Adds documents. Returns how many were new. */
+export async function addFiles(list: File[], quietDupes = false): Promise<number> {
   const fresh = list.filter(f => !state.files.some(e => e.key === fileKey(f)));
   const dupes = list.length - fresh.length;
   if (dupes && !quietDupes) notify('info', dupes === 1 ? `${list.find(f => state.files.some(e => e.key === fileKey(f)))?.name} is already added.` : `${dupes} files were already added.`);
@@ -546,20 +394,20 @@ export async function addFiles(all: File[], quietDupes = false): Promise<number>
   return entries.length;
 }
 
-// ---------- a remembered folder (Chromium) ----------
+// ---------- open a folder (Chromium; this session only) ----------
 
 const FOLDER_EXTENSIONS = ['.pdf', '.xlsx', '.xlsm', '.xls', '.ods', '.csv', '.tsv', '.txt'];
+/** The folder opened this session, held in memory only so "Read again" can pick up new or changed files. */
+let openedFolder: DirHandle | null = null;
 
 async function readFromFolder(h: DirHandle) {
   set({ folder: { name: h.name, status: 'reading' } });
   try {
-    const setupNote = await loadFolderSetup(await readFolder(h, ['.json'], 20, 1), h.name);
     const files = await readFolder(h, FOLDER_EXTENSIONS);
     set({ folder: { name: h.name, status: 'ready' } });
-    if (!files.length) { notify('warn', `There are no PDF, Excel, or CSV files in ${h.name}.${setupNote ? ` ${setupNote}` : ''}`); return; }
+    if (!files.length) { notify('warn', `There are no PDF, Excel, or CSV files in ${h.name}.`); return; }
     const added = await addFiles(files, true);
-    const filesNote = added ? `Read ${plural(added, 'file')} from ${h.name}.` : `The ${plural(files.length, 'file')} in ${h.name} were already added.`;
-    notify('info', [filesNote, setupNote].filter(Boolean).join(' '));
+    notify('info', added ? `Read ${plural(added, 'file')} from ${h.name}.` : `The ${plural(files.length, 'file')} in ${h.name} were already added.`);
   } catch (err) {
     console.error(err);
     set({ folder: { name: h.name, status: 'gone' } });
@@ -567,46 +415,19 @@ async function readFromFolder(h: DirHandle) {
   }
 }
 
-/** "Open folder": pick a folder, read its documents, and remember it for next time. */
+/** "Open folder": pick a folder and read its documents. */
 export async function openFolder() {
   if (!canOpenFolder) return;
   const h = await pickFolder();
   if (!h) return;
-  try { await saveFolderHandle(h); } catch (err) { console.warn('Folder not remembered', err); }
+  openedFolder = h;
   await readFromFolder(h);
 }
 
-/** "Reopen": read the remembered folder again, asking the browser for permission if it wants a click. */
-export async function reopenFolder() {
-  const h = await loadFolderHandle();
-  if (!h) { set({ folder: null }); return; }
-  if (await folderPermission(h, true) !== 'granted') {
-    set({ folder: { name: h.name, status: 'needs-click' } });
-    notify('warn', `Number finder needs your OK to read ${h.name}.`);
-    return;
-  }
-  await readFromFolder(h);
+/** "Read again": the folder opened this session, for files added or changed since. */
+export async function rereadFolder() {
+  if (openedFolder) await readFromFolder(openedFolder);
 }
-
-export async function forgetFolder() {
-  try { await forgetFolderHandle(); } catch { /* nothing to forget */ }
-  set({ folder: null });
-}
-
-/** On start: read the remembered folder without asking when the browser has kept the permission; otherwise offer a click. */
-async function restoreFolder() {
-  if (!canOpenFolder) return;
-  const h = await loadFolderHandle();
-  if (!h) return;
-  try {
-    if (await folderPermission(h, false) === 'granted') await readFromFolder(h);
-    else set({ folder: { name: h.name, status: 'needs-click' } });
-  } catch (err) {
-    console.warn('Remembered folder not restored', err);
-    set({ folder: { name: h.name, status: 'gone' } });
-  }
-}
-if (typeof window !== 'undefined') void restoreFolder();
 
 function updateFile(id: string, patch: Partial<FileEntry>) {
   set(s => ({ files: s.files.map(f => (f.id === id ? { ...f, ...patch } : f)) }));
@@ -796,7 +617,7 @@ export function submitFind(): boolean {
       return false;
     }
     const existing = checkFor(checkGroupId);
-    if (existing && existing.status !== 'idle' && sameTerms(existing.terms, q.terms) && sameSettings(existing.settings, settings)) {
+    if (existing && sameTerms(existing.terms, q.terms) && sameSettings(existing.settings, settings)) {
       selectRun(existing.id);
       notify('info', 'That check is already in the history; showing it.');
       return true;
@@ -820,7 +641,7 @@ export function submitFind(): boolean {
   for (const t of targets) {
     const existing = searchFor(t.value, t.range);
     if (existing) {
-      if (existing.status !== 'idle' && sameTerms(existing.terms, q.terms) && sameSettings(existing.settings, settings)) {
+      if (sameTerms(existing.terms, q.terms) && sameSettings(existing.settings, settings)) {
         firstId ??= existing.id;
         if (targets.length === 1) { selectRun(existing.id); notify('info', 'That search is already in the history; showing it.'); }
         continue;
@@ -1098,7 +919,7 @@ export function clearFinished() {
   });
 }
 
-/** Run a restored (idle) or finished run again with its saved settings and filters. */
+/** Run a finished or stopped run again with the same settings and filters. */
 export function rerunRun(id: string) {
   const r = state.runs.find(x => x.id === id);
   if (!r) return;

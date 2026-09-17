@@ -318,15 +318,10 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .dropzone.big { flex: 1; margin: 12px 0 8px; justify-content: center; font-size: 18px; cursor: pointer; }
 .dropzone.big .hint { font-size: 13px; max-width: 460px; }
 .line.center { justify-content: center; }
-.setup-buttons { gap: 6px; }
+.add-buttons { gap: 6px; }
 .folder-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .folder-line .link { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
-.folder-card {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  background: var(--accent-soft); color: var(--text); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 14px; font-size: 13px;
-}
-.folder-card svg { color: var(--accent-text); flex: none; }
-.add-files-prompt .folder-card, .add-files-prompt .folder-line { justify-content: center; }
+.add-files-prompt .folder-line { justify-content: center; }
 .drop-overlay {
   position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
   background: rgba(31, 95, 168, 0.12); border: 3px dashed var(--accent); pointer-events: none;

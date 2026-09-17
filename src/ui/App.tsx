@@ -69,7 +69,7 @@ export function App() {
           <IconFileSearch className="brand-icon" size={22} stroke={1.75} aria-hidden />
           <span>
             <h1>Number finder</h1>
-            <span className="brand-sub" title="This page can't send anything over the network. Your files are read inside this browser tab only.">
+            <span className="brand-sub" title="Your files are read inside this browser tab and kept in memory only. Nothing is saved: close or reload the tab and everything is forgotten.">
               <IconLock size={12} stroke={2} aria-hidden /> All data stays local
             </span>
           </span>

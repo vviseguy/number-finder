@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { MIN_PANE, setPaneWidth, useAppState } from '../state/store';
 
-/** The drag handle between the main column and the side pane. Drag to resize; the width is remembered. */
+/** The drag handle between the main column and the side pane. Drag to resize (for this session). */
 export function Splitter() {
   const s = useAppState();
   const start = useRef<{ x: number; width: number } | null>(null);

@@ -37,9 +37,6 @@ export interface Terms {
 export const NO_TERMS: Terms = { include: [], exclude: [], fuzzy: [], prefer: [] };
 export const emptyTerms = (): Terms => ({ include: [], exclude: [], fuzzy: [], prefer: [] });
 
-/** Terms saved by an earlier version may lack the newer lists. */
-export const normalizeTerms = (t: Partial<Terms> | undefined): Terms => ({ ...emptyTerms(), ...t });
-
 export interface QueryNumber { value: number; decimals: number; text: string }
 
 export interface Query {

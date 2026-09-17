@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { IconArrowsExchange, IconChevronDown, IconClock, IconHistory, IconLoader2, IconPlayerStop, IconSearch, IconUpload } from '@tabler/icons-react';
 import { chooseFiles } from './FindBar';
-import { FolderLine, SetupButtons } from './FilesView';
+import { AddButtons, FolderLine } from './FilesView';
 import {
   amountIndex, fileLabel, fileTermText, groupAmounts, groupName, restoreVersion, retryWith, searchSecondsOf, setResultSort, showPreview, shownRun, sortedMatches,
   stopRun, SUM_MAX_RESULTS, targetText, useAppState, viewVersion, type Run, type SearchRun,
@@ -36,7 +36,7 @@ export function Results() {
             {s.folder && <FolderLine folder={s.folder} />}
             <span className="line center">
               <button type="button" className="btn" onClick={chooseFiles}>Choose files</button>
-              <SetupButtons compact />
+              <AddButtons />
             </span>
           </div>
         </div>
@@ -103,7 +103,6 @@ function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean
         )}
       </h3>
       <SearchNote run={r} readOnly={readOnly} />
-      {r.status === 'idle' && <p className="muted pad">This search is from an earlier session. Add its files and press Run.</p>}
       {r.status === 'done' && !matches.length && <NotFound run={r} readOnly={readOnly} />}
       {matches.length > 0 && (
         <div className="result-list" onKeyDown={arrowNav}>
