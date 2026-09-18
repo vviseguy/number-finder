@@ -377,7 +377,10 @@ test('search mode: shown only for sums, and it decides which groupings come firs
     if (others) return 2 + Number(others[1]);
     return / across /.test(title) ? 2 : 1;
   };
-  const titles = () => page.locator('.combo-title').allInnerTexts();
+  const titles = async () => { // the new version re-renders: wait for its sums before reading them
+    await expect(page.locator('.combo-title').first()).toBeVisible();
+    return page.locator('.combo-title').allInnerTexts();
+  };
 
   await find(page, '90,235'); // wages + interest + dividends: one number from each of three files
   await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, across files');
@@ -729,29 +732,46 @@ test('after a full session, the browser holds nothing, and reloading starts from
   await expect(page.locator('.add-files-prompt')).toBeVisible();
 });
 
-test('what older versions saved is deleted when the page opens, and nothing else is touched', async ({ page }) => {
+test('everything older versions saved is wiped when the page opens, and nothing else is touched', async ({ page }) => {
   test.skip(!!process.env.NF_URL, 'seeds storage through a page from disk');
   await page.goto(PROBE);
-  await page.evaluate(async () => {
-    localStorage.setItem('number-finder:setup:v4', JSON.stringify({ groups: [{ id: 'g', name: 'Client Alpha', color: 0, members: [] }], runs: [{ kind: 'search', target: 3235 }] }));
-    localStorage.setItem('number-finder:theme', 'dark');
-    localStorage.setItem('number-finder:pane', '700');
+  const seeded = await page.evaluate(async () => {
+    // Every name Number finder has ever saved under, in every place a page can save, plus other pages' data.
+    for (const key of ['number-finder:setup:v1', 'number-finder:setup:v2', 'number-finder:setup:v3', 'number-finder:setup:v4', 'number-finder:theme', 'number-finder:pane', 'numberfinder-old']) {
+      localStorage.setItem(key, JSON.stringify({ groups: [{ id: 'g', name: 'Client Alpha' }], runs: [{ kind: 'search', target: 3235 }] }));
+    }
     localStorage.setItem('another-app:settings', 'kept');
-    await new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open('number-finder', 1);
+    sessionStorage.setItem('number-finder:draft', '9,120');
+    sessionStorage.setItem('another-app:tab', 'kept');
+    const db = (name: string) => new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open(name, 1);
       req.onupgradeneeded = () => req.result.createObjectStore('handles');
       req.onsuccess = () => { req.result.close(); resolve(); };
       req.onerror = () => reject(req.error);
     });
+    await db('number-finder');
+    await db('number-finder-handles');
+    await db('another-app');
+    let caches_: string[] = [];
+    if ('caches' in self) {
+      try {
+        await caches.open('number-finder-v1');
+        await caches.open('another-app-v1');
+        caches_ = await caches.keys();
+      } catch { /* not available to pages from disk */ }
+    }
+    return { caches: caches_ };
   });
 
   await page.goto(APP);
   await expect(picker(page)).toHaveAttribute('data-files', '0');
   await expect(page.locator('.search-row')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.dataset.theme ?? 'system')).toBe('system');
-  await page.waitForTimeout(300); // the old database is deleted in the background
+  await page.waitForTimeout(500); // the databases and caches are deleted in the background
 
   const left = await browserStorage(page);
   expect(left.localStorage).toEqual(['another-app:settings']);
-  expect(left.indexedDB).toEqual([]);
+  expect(left.sessionStorage).toEqual(['another-app:tab']);
+  expect(left.indexedDB).toEqual(['another-app']);
+  expect(left.caches).toEqual(seeded.caches.length ? ['another-app-v1'] : []);
 });

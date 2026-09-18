@@ -32,7 +32,7 @@ Five independent checks, from reading the code to watching the browser:
 
 In the built file, the words `localStorage`, `sessionStorage`, and `indexedDB` appear only inside the lock (once for the page and once per worker) and in a read-only check in ExcelJS, the export library, which the lock turns into "not available".
 
-**Data from older versions.** Versions before this one remembered the setup in the browser. When the page opens, it deletes those: every `localStorage` key starting `number-finder:` and the IndexedDB database `number-finder`. Nothing else is read or touched.
+**Data from older versions.** Versions before this one remembered the setup in the browser. When the page opens, it wipes anything an older version saved: every name Number finder has ever saved under starts `number-finder`, so it removes those from local storage, session storage, IndexedDB, and the cache store, and says in the console what it removed. It checks afterwards and warns if anything of its own is left. It stops at its own names rather than clearing everything at that address: pages opened from disk share one storage area with every other local page, and the website shares one with everything else published at the same address, so a blanket wipe would delete unrelated data. A browser test seeds all four places with old data, plus another app's data, and checks that only Number finder's is removed.
 
 **What the browser itself keeps**, outside the page's control: the list of downloads, the folder the file picker last opened, the page's address in your browsing history (no document data is ever in the address), and, for the website, a cached copy of the page itself. A private window keeps none of these after it closes.
 

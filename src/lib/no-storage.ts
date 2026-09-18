@@ -18,9 +18,13 @@
 //   get around that; nothing in Number finder makes frames, and the browser test that reads the browser's
 //   storage after a full session (e2e/app.spec.ts, "after a full session…") is the independent check.
 //
-// One exception, in the page only and before storage is turned off: what OLDER versions of Number finder
-// saved is deleted — localStorage keys starting "number-finder:" and the IndexedDB database
-// "number-finder". Nothing else is read, and nothing is written.
+// One exception, in the page only and before storage is turned off: whatever an OLDER version of Number
+// finder saved in this browser is deleted. Every name it has ever used starts "number-finder" (the setup
+// under four key names, the theme, the pane width, and one database), so the sweep takes anything by that
+// name out of local storage, session storage, IndexedDB and the cache store, and says in the console what
+// it removed. It deliberately stops there rather than clearing the whole origin: pages opened from disk
+// share one storage area with every other local page, and the website shares one with everything else
+// published at the same address, so a blanket wipe would delete other people's — or your own — unrelated data.
 
 type Global = typeof globalThis & Record<string, unknown>;
 type Proto = Record<string, unknown>;
@@ -105,22 +109,37 @@ export function lockStorage(g: Global): void {
   }
 }
 
-/** Deletes what older versions of Number finder saved (their names only). Page only; call before lockStorage. */
+/** Every name Number finder has ever saved anything under. */
+const OURS = /^number-?finder/i;
+const removed = (what: string, name: string) => console.info(`Number finder: removed ${what} "${name}", left by an older version.`);
+
+/**
+ * Deletes anything an older version of Number finder saved in this browser, by name (see the note above).
+ * The page only, and before lockStorage turns these APIs off.
+ */
 export function removeOlderSaves(g: Global): void {
+  for (const where of ['localStorage', 'sessionStorage'] as const) {
+    try {
+      const store = g[where] as Storage | undefined;
+      if (!store) continue;
+      // Listed first, then removed: removing while walking the list by index can skip a key.
+      const ourKeys = () => Array.from({ length: store.length }, (_, i) => store.key(i)).filter((k): k is string => !!k && OURS.test(k));
+      for (const key of ourKeys()) { store.removeItem(key); removed(where, key); }
+      const left = ourKeys();
+      if (left.length) console.warn(`Number finder: ${left.join(', ')} could not be removed from ${where}.`);
+    } catch { /* unavailable here: nothing of ours can be in it */ }
+  }
   try {
-    const ls = g.localStorage as Storage | undefined;
-    if (ls) {
-      for (let i = ls.length - 1; i >= 0; i--) {
-        const key = ls.key(i);
-        if (key?.startsWith('number-finder:')) ls.removeItem(key);
-      }
-    }
-  } catch { /* storage unavailable: nothing to delete */ }
+    const idb = g.indexedDB as IDBFactory | undefined;
+    void idb?.databases?.().then(list => {
+      for (const db of list) if (db.name && OURS.test(db.name)) { idb.deleteDatabase(db.name); removed('database', db.name); }
+    }).catch(() => { /* nothing to delete */ });
+  } catch { /* nothing to delete */ }
   try {
-    const idb = g.indexedDB as IDBFactory | undefined; // kept here: it's turned off right after this
-    void idb?.databases?.()
-      .then(list => { if (list.some(d => d.name === 'number-finder')) idb.deleteDatabase('number-finder'); })
-      .catch(() => { /* nothing to delete */ });
+    const store = g.caches as CacheStorage | undefined;
+    void store?.keys().then(names => {
+      for (const name of names) if (OURS.test(name)) void store.delete(name).then(() => removed('cache', name));
+    }).catch(() => { /* nothing to delete */ });
   } catch { /* nothing to delete */ }
 }
 
