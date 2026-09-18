@@ -18,13 +18,12 @@
 //   get around that; nothing in Number finder makes frames, and the browser test that reads the browser's
 //   storage after a full session (e2e/app.spec.ts, "after a full session…") is the independent check.
 //
-// One exception, in the page only and before storage is turned off: whatever an OLDER version of Number
-// finder saved in this browser is deleted. Every name it has ever used starts "number-finder" (the setup
-// under four key names, the theme, the pane width, and one database), so the sweep takes anything by that
-// name out of local storage, session storage, IndexedDB and the cache store, and says in the console what
-// it removed. It deliberately stops there rather than clearing the whole origin: pages opened from disk
-// share one storage area with every other local page, and the website shares one with everything else
-// published at the same address, so a blanket wipe would delete other people's — or your own — unrelated data.
+// One exception, in the page only and before storage is turned off: EVERYTHING the browser has saved at
+// this address is cleared — local storage, session storage, IndexedDB, the cache store, the origin private
+// file system, and cookies. That is on purpose and wider than Number finder's own data, so no old copy of
+// it can survive anywhere. It also clears what ANY OTHER PAGE AT THE SAME ADDRESS saved, and pages opened
+// from disk all share one address, as does everything published at the same website address. What it
+// cleared goes to the console and into `cleared`, which the page reports once (see src/ui/App.tsx).
 
 type Global = typeof globalThis & Record<string, unknown>;
 type Proto = Record<string, unknown>;
@@ -109,40 +108,65 @@ export function lockStorage(g: Global): void {
   }
 }
 
-/** Every name Number finder has ever saved anything under. */
-const OURS = /^number-?finder/i;
-const removed = (what: string, name: string) => console.info(`Number finder: removed ${what} "${name}", left by an older version.`);
+/** What the wipe cleared this load, for the console and the one line the page shows. */
+export const cleared: string[] = [];
+function note(what: string): void {
+  cleared.push(what);
+  console.info(`Number finder: cleared ${what} that the browser had saved at this address.`);
+}
 
 /**
- * Deletes anything an older version of Number finder saved in this browser, by name (see the note above).
- * The page only, and before lockStorage turns these APIs off.
+ * Clears everything saved at this address, whoever saved it (see the note at the top). The page only, and
+ * before lockStorage turns these APIs off. Local storage, session storage and cookies go at once; the
+ * databases, caches and files are deleted in the background, through references taken here.
  */
-export function removeOlderSaves(g: Global): void {
+export function wipeStorage(g: Global): void {
   for (const where of ['localStorage', 'sessionStorage'] as const) {
     try {
       const store = g[where] as Storage | undefined;
-      if (!store) continue;
-      // Listed first, then removed: removing while walking the list by index can skip a key.
-      const ourKeys = () => Array.from({ length: store.length }, (_, i) => store.key(i)).filter((k): k is string => !!k && OURS.test(k));
-      for (const key of ourKeys()) { store.removeItem(key); removed(where, key); }
-      const left = ourKeys();
-      if (left.length) console.warn(`Number finder: ${left.join(', ')} could not be removed from ${where}.`);
-    } catch { /* unavailable here: nothing of ours can be in it */ }
+      if (!store?.length) continue;
+      const keys = Array.from({ length: store.length }, (_, i) => store.key(i)).filter((k): k is string => !!k);
+      store.clear();
+      for (const key of keys) note(`${where} "${key}"`);
+      if (store.length) console.warn(`Number finder: ${store.length} item(s) could not be cleared from ${where}.`);
+    } catch { /* not available here, so nothing can be in it */ }
   }
+
+  try {
+    const doc = g.document as Document | undefined;
+    const path = (g.location as Location | undefined)?.pathname ?? '/';
+    for (const pair of doc?.cookie ? doc.cookie.split(';') : []) {
+      const name = pair.split('=')[0].trim();
+      if (!name) continue;
+      // A cookie can only be expired on the path it was set for, and that isn't readable: try the likely ones.
+      for (const on of new Set(['/', path, path.replace(/[^/]*$/, '')])) doc!.cookie = `${name}=; Max-Age=0; path=${on}`;
+      note(`cookie "${name}"`);
+    }
+  } catch { /* cookies aren't available here */ }
+
   try {
     const idb = g.indexedDB as IDBFactory | undefined;
     void idb?.databases?.().then(list => {
-      for (const db of list) if (db.name && OURS.test(db.name)) { idb.deleteDatabase(db.name); removed('database', db.name); }
+      for (const db of list) if (db.name) { idb.deleteDatabase(db.name); note(`database "${db.name}"`); }
     }).catch(() => { /* nothing to delete */ });
   } catch { /* nothing to delete */ }
+
   try {
     const store = g.caches as CacheStorage | undefined;
     void store?.keys().then(names => {
-      for (const name of names) if (OURS.test(name)) void store.delete(name).then(() => removed('cache', name));
+      for (const name of names) void store.delete(name).then(gone => { if (gone) note(`cache "${name}"`); });
     }).catch(() => { /* nothing to delete */ });
   } catch { /* nothing to delete */ }
+
+  try {
+    type Dir = { keys(): AsyncIterable<string>; removeEntry(name: string, options?: { recursive?: boolean }): Promise<void> };
+    const storage = (g.navigator as Navigator | undefined)?.storage as { getDirectory?: () => Promise<Dir> } | undefined;
+    void storage?.getDirectory?.().then(async root => {
+      for await (const name of root.keys()) { await root.removeEntry(name, { recursive: true }); note(`file "${name}"`); }
+    }).catch(() => { /* no file storage here */ });
+  } catch { /* no file storage here */ }
 }
 
 const self_ = globalThis as Global;
-if (typeof self_.document === 'object') removeOlderSaves(self_);
+if (typeof self_.document === 'object') wipeStorage(self_);
 lockStorage(self_);

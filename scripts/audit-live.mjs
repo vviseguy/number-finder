@@ -11,6 +11,16 @@ const context = await browser.newContext();
 const page = await context.newPage();
 const picker = page.locator('#file-picker');
 
+// Another page at the same address saves something first: opening Number finder must clear that too.
+const other = new URL('../sum-finder/', URL_).href;
+await page.goto(other);
+await page.evaluate(() => {
+  localStorage.setItem('another-page:settings', 'goes too');
+  sessionStorage.setItem('another-page:tab', 'goes too');
+  document.cookie = 'another-page=goes-too; path=/';
+});
+console.log('seeded at', other, await page.evaluate(() => ({ local: Object.keys(localStorage), cookie: document.cookie })));
+
 await page.goto(URL_);
 await page.locator('#file-input').setInputFiles(['W-2.pdf', '1099-INT.pdf', 'workpapers.xlsx', '1040 draft.pdf'].map(f => path.join(FIX, f)));
 await page.waitForFunction(() => {

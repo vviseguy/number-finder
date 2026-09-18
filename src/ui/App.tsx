@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { IconDeviceDesktop, IconFileSearch, IconLock, IconMoon, IconSun, IconUpload } from '@tabler/icons-react';
-import { addFiles, setDragging, setTheme, useAppState, type Theme } from '../state/store';
+import { addFiles, notify, setDragging, setTheme, useAppState, type Theme } from '../state/store';
+import { cleared } from '../lib/no-storage';
+import { plural } from '../lib/format';
 import { chooseFiles } from './FilePicker';
 import { FindBar } from './FindBar';
 import { RunList } from './RunList';
@@ -32,6 +34,16 @@ function ThemeToggle({ theme }: { theme: Theme }) {
 export function App() {
   const s = useAppState();
   const main = useRef<HTMLElement>(null);
+
+  // Opening the page clears everything saved at this address (see lib/no-storage.ts). Say so when there
+  // was something, since it includes whatever another page at the same address had saved. The databases,
+  // caches and files go in the background, so the count is read once they have had a moment.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (cleared.length) notify('info', `Cleared ${plural(cleared.length, 'thing')} the browser had saved at this address. Number finder saves nothing.`);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Files can be dropped anywhere on the page, on any view.
   useEffect(() => {

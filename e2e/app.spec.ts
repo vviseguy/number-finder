@@ -732,17 +732,17 @@ test('after a full session, the browser holds nothing, and reloading starts from
   await expect(page.locator('.add-files-prompt')).toBeVisible();
 });
 
-test('everything older versions saved is wiped when the page opens, and nothing else is touched', async ({ page }) => {
+test('opening the page clears everything saved at this address, whoever saved it', async ({ page }) => {
   test.skip(!!process.env.NF_URL, 'seeds storage through a page from disk');
   await page.goto(PROBE);
-  const seeded = await page.evaluate(async () => {
-    // Every name Number finder has ever saved under, in every place a page can save, plus other pages' data.
+  await page.evaluate(async () => {
+    // Every name Number finder has ever saved under, in every place a page can save — and another page's data.
     for (const key of ['number-finder:setup:v1', 'number-finder:setup:v2', 'number-finder:setup:v3', 'number-finder:setup:v4', 'number-finder:theme', 'number-finder:pane', 'numberfinder-old']) {
       localStorage.setItem(key, JSON.stringify({ groups: [{ id: 'g', name: 'Client Alpha' }], runs: [{ kind: 'search', target: 3235 }] }));
     }
-    localStorage.setItem('another-app:settings', 'kept');
+    localStorage.setItem('another-app:settings', 'goes too');
     sessionStorage.setItem('number-finder:draft', '9,120');
-    sessionStorage.setItem('another-app:tab', 'kept');
+    sessionStorage.setItem('another-app:tab', 'goes too');
     const db = (name: string) => new Promise<void>((resolve, reject) => {
       const req = indexedDB.open(name, 1);
       req.onupgradeneeded = () => req.result.createObjectStore('handles');
@@ -752,26 +752,20 @@ test('everything older versions saved is wiped when the page opens, and nothing 
     await db('number-finder');
     await db('number-finder-handles');
     await db('another-app');
-    let caches_: string[] = [];
     if ('caches' in self) {
       try {
         await caches.open('number-finder-v1');
         await caches.open('another-app-v1');
-        caches_ = await caches.keys();
       } catch { /* not available to pages from disk */ }
     }
-    return { caches: caches_ };
   });
 
   await page.goto(APP);
   await expect(picker(page)).toHaveAttribute('data-files', '0');
   await expect(page.locator('.search-row')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.dataset.theme ?? 'system')).toBe('system');
-  await page.waitForTimeout(500); // the databases and caches are deleted in the background
+  await expect(page.locator('.notice')).toContainText('the browser had saved at this address');
+  await page.waitForTimeout(500); // the databases and caches go in the background
 
-  const left = await browserStorage(page);
-  expect(left.localStorage).toEqual(['another-app:settings']);
-  expect(left.sessionStorage).toEqual(['another-app:tab']);
-  expect(left.indexedDB).toEqual(['another-app']);
-  expect(left.caches).toEqual(seeded.caches.length ? ['another-app-v1'] : []);
+  expect(await browserStorage(page)).toEqual(NOTHING);
 });
