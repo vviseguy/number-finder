@@ -324,6 +324,11 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .search-note > svg { flex: none; }
 .search-note.running { color: var(--accent-text); background: var(--accent-soft); border-color: transparent; }
 .search-note .line { gap: 6px; }
+/* Paging through a long list of matches. */
+.pager { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+.pager .muted { color: var(--text-2); }
+.pager .btn[disabled] { opacity: 0.45; cursor: default; }
+
 /* Under the bar, before a big sum search runs. */
 /* Icon in its own column beside the first line; the text and the buttons share the second column. */
 .size-note {
@@ -365,6 +370,8 @@ input.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .equation .term { white-space: nowrap; }
 .equation .op { color: var(--text-3); white-space: pre; }
 .equation .term-file { color: var(--text-2); font-weight: 500; }
+/* Which one of two same-value numbers this is ("1 Wages, tips…", "Summary!B3"). */
+.equation .term-which { color: var(--text-2); font-weight: 400; font-size: 0.86em; }
 .equation .num { font-weight: 600; }
 .equation.row { display: flex; align-items: baseline; min-width: 0; line-height: 1.5; }
 .equation.row .eq-terms { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

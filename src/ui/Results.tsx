@@ -1,16 +1,19 @@
-import { useState } from 'react';
-import { IconArrowsExchange, IconChevronDown, IconClock, IconHistory, IconLoader2, IconPlayerStop, IconSearch, IconUpload } from '@tabler/icons-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  IconArrowsExchange, IconChevronDown, IconChevronLeft, IconChevronRight, IconClock, IconHistory, IconLoader2, IconPlayerStop, IconSearch, IconUpload,
+} from '@tabler/icons-react';
 import { chooseFiles, FolderLine, OpenFolderButton } from './FilePicker';
 import {
   amountIndex, fileLabel, fileTermText, restoreVersion, retryWith, searchSecondsOf, setResultSort, showPreview, shownRun, sortedMatches,
   scopeAmounts, scopePhrase, stopRun, SUM_MAX_RESULTS, targetText, useAppState, viewVersion, type Run, type SearchRun,
 } from '../state/store';
 import { hoverProps, useLinkClass } from '../state/hover';
-import { elapsedLabel, formatMoney, locationShort, longerSeconds, madeOfPhrase, plural, roundingPhrase, secondsLabel } from '../lib/format';
+import { elapsedLabel, formatMoney, locationShort, longerSeconds, madeOfPhrase, plural, roundingPhrase, secondsLabel, whichOne } from '../lib/format';
 import { NarrowChips } from './Narrow';
 import { findNearMiss } from '../lib/nearmiss';
+import { lookalikeItems } from '../lib/lookalike';
 import { passesTerms, termsPhrase } from '../lib/query';
-import { SORT_LABEL, SORTS, type ResultSort } from '../lib/rank';
+import { SORT_HINT, SORT_LABEL, SORTS, type ResultSort } from '../lib/rank';
 import type { Match, MatchItem } from '../types';
 import { arrowNav } from './common';
 import { CheckResults } from './CheckResults';
@@ -84,18 +87,52 @@ function VersionBar({ live, past }: { live: Run; past: boolean }) {
   );
 }
 
+/** Matches shown at once. A search may find thousands; the rest are a page away. */
+const PAGE_SIZE = 100;
+
 function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean }) {
   const s = useAppState();
   const matches = sortedMatches(s, r);
   const previewId = s.previewId ?? matches[0]?.items[0].id ?? null;
+  const [page, setPage] = useState(0);
+  const head = useRef<HTMLHeadingElement>(null);
+
+  // A different search, a new version of one, or a new order: back to the first page.
+  useEffect(() => setPage(0), [r.id, r.version, s.resultSort]);
+  const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
+  const at = Math.min(page, pages - 1);
+  const shown = pages > 1 ? matches.slice(at * PAGE_SIZE, at * PAGE_SIZE + PAGE_SIZE) : matches;
+  const goTo = (p: number) => { setPage(p); head.current?.scrollIntoView({ block: 'start' }); };
+
+  // Two sums can hold different numbers that read the same (a W-2 has 85,000 in box 1 and again in box 3).
+  // The face compared is what the row shows — its title and its numbers — and each number that needs one
+  // gets a word: its label, with the file in front when the look-alikes are in different files. Worked
+  // out over every match, not just this page, so a match reads the same wherever it appears.
+  const idx = amountIndex(s);
+  const distinguish = useMemo(() => {
+    const face = (m: Match) => `${sumTitle(m)} :: ${m.items.map(it => `${it.sign}${idx.get(it.id)?.amount.value ?? it.id}`).join('+')}`;
+    const out = new Map<string, string>();
+    const done = new Set<string>();
+    for (const sharing of lookalikeItems(matches, face).values()) {
+      if (done.has(sharing.join('|'))) continue; // the ids sharing a spot are handled together, once
+      done.add(sharing.join('|'));
+      const hits = sharing.flatMap(id => { const h = idx.get(id); return h ? [{ id, ...h }] : []; });
+      const where = new Set(hits.map(x => x.file)).size > 1 ? (x: typeof hits[0]) => `${fileLabel(x.file)} · ` : () => '';
+      let texts = hits.map(x => `${where(x)}${whichOne(x.amount)}`);
+      // The same label in two places (a repeated line, a column of totals): say where instead.
+      if (new Set(texts).size < texts.length) texts = hits.map(x => `${where(x)}${locationShort(x.amount)}`);
+      hits.forEach((x, i) => out.set(x.id, texts[i]));
+    }
+    return out;
+  }, [matches, idx]);
 
   return (
     <section className="results" aria-labelledby="h-results">
-      <h3 id="h-results" className="sub-h">
+      <h3 id="h-results" className="sub-h" ref={head}>
         <span className="nowrap">Results for <span className="num">{targetText(r)}</span></span>
         {matches.length > 0 && <span className="count">{plural(matches.length, 'match', 'matches')} · ↑ ↓ to move · hover a number to see it elsewhere</span>}
         {matches.length > 1 && (
-          <span className="push line sort-pick">
+          <span className="push line sort-pick" title={SORT_HINT}>
             <span className="label">Order</span>
             <Pick value={s.resultSort} label="Order of results" options={SORTS.map(k => ({ value: k, label: SORT_LABEL[k] }))} onChange={v => setResultSort(v as ResultSort)} />
           </span>
@@ -103,12 +140,38 @@ function SearchResults({ run: r, readOnly }: { run: SearchRun; readOnly: boolean
       </h3>
       <SearchNote run={r} readOnly={readOnly} />
       {r.status === 'done' && !matches.length && <NotFound run={r} readOnly={readOnly} />}
+      {pages > 1 && <Pager at={at} pages={pages} total={matches.length} onGo={goTo} />}
       {matches.length > 0 && (
         <div className="result-list" onKeyDown={arrowNav}>
-          {matches.map(m => <MatchRows key={m.items.map(i => `${i.sign < 0 ? '-' : ''}${i.id}`).join('+')} match={m} run={r} previewId={previewId} />)}
+          {shown.map(m => (
+            <MatchRows
+              key={m.items.map(i => `${i.sign < 0 ? '-' : ''}${i.id}`).join('+')}
+              match={m} run={r} previewId={previewId} distinguish={distinguish}
+            />
+          ))}
         </div>
       )}
+      {pages > 1 && <Pager at={at} pages={pages} total={matches.length} onGo={goTo} />}
     </section>
+  );
+}
+
+/** "Matches 101–200 of 4,312" with the way back and forward. Only shown when there is more than one page. */
+function Pager({ at, pages, total, onGo }: { at: number; pages: number; total: number; onGo: (page: number) => void }) {
+  const from = at * PAGE_SIZE + 1;
+  const to = Math.min(total, (at + 1) * PAGE_SIZE);
+  return (
+    <div className="pager" role="navigation" aria-label="Pages of results">
+      <button type="button" className="btn sm" disabled={at === 0} onClick={() => onGo(at - 1)}>
+        <IconChevronLeft size={12} aria-hidden /> Previous
+      </button>
+      <span className="muted">
+        Matches {from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {total.toLocaleString('en-US')} · page {at + 1} of {pages.toLocaleString('en-US')}
+      </span>
+      <button type="button" className="btn sm" disabled={at >= pages - 1} onClick={() => onGo(at + 1)}>
+        Next <IconChevronRight size={12} aria-hidden />
+      </button>
+    </div>
   );
 }
 
@@ -135,7 +198,7 @@ function SearchNote({ run: r, readOnly }: { run: SearchRun; readOnly: boolean })
   if (r.status !== 'done' || !sums || (r.reason !== 'timeLimit' && r.reason !== 'stopped' && r.reason !== 'maxResults')) return null;
   const longer = r.reason === 'maxResults' ? undefined : longerSeconds(limit);
   const why = r.reason === 'maxResults'
-    ? `Stopped after the first ${SUM_MAX_RESULTS} matches, so there may be others.`
+    ? `Stopped after the first ${SUM_MAX_RESULTS.toLocaleString('en-US')} matches, so there may be others.`
     : r.reason === 'stopped'
       ? `Stopped after ${elapsedLabel(r.elapsedMs)}, before trying every combination.`
       : `Stopped at the ${secondsLabel(limit ?? 0)} time limit, before trying every combination.`;
@@ -158,7 +221,7 @@ function SearchNote({ run: r, readOnly }: { run: SearchRun; readOnly: boolean })
 }
 
 /** A sum: a title line, the equation along the bottom (trimmed to … with the total always visible), and the rows when opened. */
-function MatchRows({ match, run, previewId }: { match: Match; run: SearchRun; previewId: string | null }) {
+function MatchRows({ match, run, previewId, distinguish }: { match: Match; run: SearchRun; previewId: string | null; distinguish?: Map<string, string> }) {
   const [open, setOpen] = useState(false);
   if (match.items.length === 1) return <ItemRow item={match.items[0]} match={match} run={run} previewId={previewId} />;
   const holdsSelected = match.items.some(it => it.id === previewId);
@@ -167,7 +230,7 @@ function MatchRows({ match, run, previewId }: { match: Match; run: SearchRun; pr
       <button type="button" className="combo-head" aria-expanded={open} onClick={() => setOpen(o => !o)}>
         <span className="combo-title" title={sumTitle(match)}>{sumTitle(match)}</span>
         <IconChevronDown size={16} className="chev" aria-hidden />
-        <Equation match={match} withFiles={false} layout="row" />
+        <Equation match={match} withFiles={false} layout="row" distinguish={distinguish} />
       </button>
       {open && match.items.map(it => <ItemRow key={it.id} item={it} run={run} previewId={previewId} nested />)}
     </div>

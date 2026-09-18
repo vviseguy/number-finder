@@ -8,9 +8,12 @@ import { Money } from './Money';
  * A sum on one line: "W-2 85,000.00 + INT 3,234.56 −(265.44) = 88,000.00".
  * Each piece is hoverable (linking the same value elsewhere) and carries the full location in a tooltip.
  * layout 'row' puts the terms and the total side by side, trimming the terms to … when they overflow
- * so the total is always visible.
+ * so the total is always visible. `distinguish` adds a word to the numbers that need one — when another
+ * match holds the same value from somewhere else, and the two would otherwise read the same (lib/lookalike.ts).
  */
-export function Equation({ match, withFiles = true, layout = 'inline' }: { match: Match; withFiles?: boolean; layout?: 'inline' | 'row' }) {
+export function Equation({ match, withFiles = true, layout = 'inline', distinguish }: {
+  match: Match; withFiles?: boolean; layout?: 'inline' | 'row'; distinguish?: Map<string, string>;
+}) {
   const idx = amountIndex();
   const terms = match.items.map((it, i) => {
     const h = idx.get(it.id);
@@ -24,6 +27,7 @@ export function Equation({ match, withFiles = true, layout = 'inline' }: { match
           <span title={title}>
             {withFiles && <span className="term-file">{fileLabel(h.file)} </span>}
             <Money value={h.amount.value} decimals={h.amount.decimals} flipped={neg} />
+            {distinguish?.get(it.id) && <span className="term-which"> {distinguish.get(it.id)}</span>}
           </span>
         </Ev>
       </span>

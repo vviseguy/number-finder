@@ -87,6 +87,8 @@ describe('parseQuery', () => {
     expect(parseQuery('3,235 mode:clump').grouping).toBe('clumped');
     expect(parseQuery('3,235 mode:spread').grouping).toBe('spread');
     expect(parseQuery('3,235 mode:across').grouping).toBe('across');
+    expect(parseQuery('3,235 mode:scattered').grouping).toBe('scattered');
+    expect(parseQuery('3,235 mode:most-spread').grouping).toBe('scattered');
     expect(parseQuery('3,235').grouping).toBeUndefined();
     expect(parseQuery('3,235 mode:wild').errors[0]).toContain('mode:clumped');
   });

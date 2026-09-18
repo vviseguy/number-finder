@@ -218,7 +218,7 @@ test('the bar grammar: a range, sums:, ±, neg, and in: with file names', async 
   await expect(page.locator('.version-bar')).toContainText('Version 1');
 
   await find(page, '3,234.56 sums:2 neg ±0');
-  await expect(page.locator('.search-row').first()).toContainText('sums of up to 2, across files · exact · negatives');
+  await expect(page.locator('.search-row').first()).toContainText('sums of up to 2, clumped · exact · negatives');
   await expect(page.locator('.combo').first()).toContainText('= 3,234.56');
 
   await find(page, '85,000 in:1099-INT'); // a file name, without its extension
@@ -353,7 +353,7 @@ test('at most N numbers counted as negative', async ({ page }) => {
   await page.getByLabel('Negatives').selectOption('upto');
   await expect(page.locator('.opt', { hasText: 'Negatives' }).locator('.sum-size')).toHaveValue('1');
   await find(page, '3,234.56'); // 3,500.00 − 265.44
-  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 2, across files · exact · up to 1 negative');
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 2, clumped · exact · up to 1 negative');
   await expect(page.locator('.combo-title').first()).toContainText('1 counted as negative');
   await find(page, '3,234.56 neg:0'); // no pair without a negative
   await expect(page.locator('.not-found')).toBeVisible();
@@ -369,7 +369,7 @@ test('search mode: shown only for sums, and it decides which groupings come firs
   await expect(modePill).toHaveCount(0); // "to number": no groupings to choose between
   await page.getByLabel('Match').selectOption('exact');
   await page.getByLabel('Most numbers in a sum').fill('3');
-  await expect(modePill.locator('.pick-text')).toHaveText('across files');
+  await expect(modePill.locator('.pick-text')).toHaveText('clumped');
 
   // How many files a sum's title names: "in X" = 1, "across A and B" = 2, "across A, B and 3 other files" = 5.
   const filesIn = (title: string) => {
@@ -382,23 +382,61 @@ test('search mode: shown only for sums, and it decides which groupings come firs
     return page.locator('.combo-title').allInnerTexts();
   };
 
-  await find(page, '90,235'); // wages + interest + dividends: one number from each of three files
-  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, across files');
-  await expect(page.locator('.combo-title').first()).toContainText('and 1 other file');
+  await find(page, '90,235'); // wages + interest + dividends, clumped: the sums from fewest files first
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, clumped');
   let t = await titles();
-  expect(filesIn(t[0])).toBe(Math.max(...t.map(filesIn)));
+  expect(filesIn(t[0])).toBe(Math.min(...t.map(filesIn)));
 
-  await page.getByLabel('Search mode').selectOption('clumped');
+  await page.getByLabel('Search mode').selectOption('across');
   await find(page, '90,235'); // same number, new mode: a new version of the same search
   await expect(page.locator('.search-row')).toHaveCount(1);
-  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, clumped');
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, across files');
+  await expect(page.locator('.combo-title').first()).toContainText('and 1 other file');
   t = await titles();
-  expect(filesIn(t[0])).toBe(Math.min(...t.map(filesIn)));
+  expect(filesIn(t[0])).toBe(Math.max(...t.map(filesIn)));
+
+  await find(page, '90,235 mode:scattered'); // as far apart as the documents allow: also most files first
+  await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, most spread');
+  t = await titles();
+  expect(filesIn(t[0])).toBe(Math.max(...t.map(filesIn)));
 
   await find(page, '90,235 mode:spread');
   await expect(page.locator('.search-row').first()).toContainText('sums of exactly 3, spread within files');
   await page.getByLabel('Match', { exact: true }).selectOption('1'); // exact: the preview's "Next match" buttons also say "match"
   await expect(modePill).toHaveCount(0);
+});
+
+test('sums that read the same say which number they used, and a long list pages through', async ({ page }) => {
+  await open(page, [...SOURCES, ...RETURN]);
+
+  // The W-2 holds 85,000 in box 1 and again in box 3, so "85,000 + 2,000 + 3,235" is two real answers.
+  await find(page, '90,235 sums:3');
+  const list = page.locator('.result-list');
+  await expect(list.locator('.combo').first()).toBeVisible();
+  await expect(list).toContainText('Wages, tips');
+  await expect(list).toContainText('Social security');
+  await expect(page.locator('.pager')).toHaveCount(0); // 46 matches: one page
+  await page.screenshot({ path: path.join(SHOTS, '14-lookalike-sums.png') });
+
+  await find(page, '90,235 sums:4 neg'); // 130 matches
+  await expect(page.locator('.search-note')).toHaveCount(0); // finishes inside the time limit, well under the cap
+  const pager = page.locator('.pager').first();
+  await expect(pager).toContainText('Matches 1–100 of 130 · page 1 of 2');
+  await expect(list.locator('> *')).toHaveCount(100);
+  await expect(pager.getByRole('button', { name: 'Previous' })).toBeDisabled(); // already on the first page
+
+  await pager.getByRole('button', { name: 'Next' }).click();
+  await expect(pager).toContainText('Matches 101–130 of 130 · page 2 of 2');
+  await expect(list.locator('> *')).toHaveCount(30);
+  await expect(pager.getByRole('button', { name: 'Next' })).toBeDisabled();
+  await page.screenshot({ path: path.join(SHOTS, '15-results-page-2.png') });
+  await pager.getByRole('button', { name: 'Previous' }).click();
+  await expect(pager).toContainText('Matches 1–100');
+  await pager.getByRole('button', { name: 'Next' }).click();
+
+  // Changing the order starts again at the first page.
+  await page.getByLabel('Order of results').selectOption('closest');
+  await expect(pager).toContainText('Matches 1–100');
 });
 
 test('time limit: a pill for sums, a note when a search runs out of time, and a way to search longer', async ({ page }) => {

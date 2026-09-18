@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { sortMatches, type ItemInfo } from './rank';
+import { DEFAULT_GROUPING, groupingOf, sortMatches, type ItemInfo } from './rank';
 import { parseQuery } from './query';
 import type { Match } from '../types';
 
@@ -41,6 +41,30 @@ describe('search mode (sums only)', () => {
   });
   test('single numbers always come first', () => {
     for (const g of ['clumped', 'spread', 'across'] as const) expect(ids(sortMatches(ms, 'best', t, gi, g))[0]).toBe('d:0');
+  });
+});
+
+describe('rows', () => {
+  // A wide printed row: boxes 1 and 5 sit on one line with three numbers between them in reading order.
+  const RI: Record<string, ItemInfo> = {
+    'w:0': { fileOrder: 0, position: 0, section: 'p1', row: 'r0', fileLabel: 'W-2.pdf', text: '' },
+    'w:5': { fileOrder: 0, position: 5, section: 'p1', row: 'r0', fileLabel: 'W-2.pdf', text: '' },
+    'w:6': { fileOrder: 0, position: 6, section: 'p1', row: 'r1', fileLabel: 'W-2.pdf', text: '' },
+    'i:0': { fileOrder: 1, position: 0, section: 'p1', row: 'r0', fileLabel: '1099-INT.pdf', text: '' },
+  };
+  const ri = (id: string) => RI[id];
+  const t = parseQuery('100').terms;
+  const ms = [pair('w:5', 'w:6'), pair('w:0', 'w:5'), pair('w:5', 'i:0')];
+
+  test('clumped: one row beats neighbours on two rows, even when they read closer together', () => {
+    expect(ids(sortMatches(ms, 'best', t, ri, 'clumped'))).toEqual(['w:0+w:5', 'w:5+w:6', 'w:5+i:0']);
+  });
+  test('most spread: the opposite order, different files first', () => {
+    expect(ids(sortMatches(ms, 'best', t, ri, 'scattered'))).toEqual(['w:5+i:0', 'w:5+w:6', 'w:0+w:5']);
+  });
+  test('clumped is the mode searches start in', () => {
+    expect(DEFAULT_GROUPING).toBe('clumped');
+    expect(groupingOf({})).toBe('clumped');
   });
 });
 

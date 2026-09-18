@@ -315,7 +315,33 @@ export function shownRun(r: Run): { run: Run; past: boolean } {
   return v ? { run: v.run, past: true } : { run: r, past: false };
 }
 
-/** What the result order needs to know about a number: its file's order, its position, and its text. */
+// Which numbers sit in the same row — what "clumped" rewards most. A sheet says so in the cell address.
+// A PDF only has coordinates, and one printed line can wobble by a point or two, so numbers are grouped
+// by height rather than rounded: a boundary would otherwise split a row in half.
+const LINE_TOLERANCE = 3; // PDF user-space units, about a third of a line
+let rowCache: { files: FileEntry[]; map: Map<string, string> } | null = null;
+function rowIndex(s: AppState): Map<string, string> {
+  if (rowCache && rowCache.files === s.files) return rowCache.map;
+  const map = new Map<string, string>();
+  for (const f of s.files) {
+    const pages = new Map<number, { y: number; ids: string[] }[]>();
+    for (const a of f.parsed?.amounts ?? []) {
+      const loc = a.location;
+      if (loc.kind !== 'pdf') { map.set(a.id, `r${loc.cell.replace(/^[A-Z]+/, '')}`); continue; }
+      const y = loc.box[1] + loc.box[3] / 2;
+      const lines = pages.get(loc.page) ?? [];
+      const line = lines.find(l => Math.abs(l.y - y) <= LINE_TOLERANCE);
+      if (line) line.ids.push(a.id);
+      else lines.push({ y, ids: [a.id] });
+      pages.set(loc.page, lines);
+    }
+    for (const lines of pages.values()) for (const [i, line] of lines.entries()) for (const id of line.ids) map.set(id, `r${i}`);
+  }
+  rowCache = { files: s.files, map };
+  return map;
+}
+
+/** What the result order needs to know about a number: its file's order, where it sits, and its text. */
 function itemInfo(s: AppState, id: string): ItemInfo | undefined {
   const hit = amountIndex(s).get(id);
   if (!hit) return undefined;
@@ -324,6 +350,7 @@ function itemInfo(s: AppState, id: string): ItemInfo | undefined {
     fileOrder: s.files.indexOf(hit.file),
     position: Number(id.slice(id.lastIndexOf(':') + 1)) || 0,
     section: loc.kind === 'pdf' ? `p${loc.page}` : loc.sheet,
+    row: rowIndex(s).get(id),
     fileLabel: fileLabel(hit.file),
     text: termText(hit.amount, fileTermText(hit.file)),
   };
@@ -686,9 +713,10 @@ function buildRequest(
 // ---------- single searches ----------
 
 // Sums collect more matches than they show first, so the search mode has real choices to put on top,
-// and run for the time limit the person chose (single numbers finish at once).
+// and run for the time limit the person chose (single numbers finish at once). The cap is high enough
+// that a long search is rarely cut short by it; the results list pages through them.
 const SEARCH_BUDGET = { maxResults: 50, timeLimitMs: 10_000 };
-export const SUM_MAX_RESULTS = 150;
+export const SUM_MAX_RESULTS = 10_000;
 function budgetFor(st: FindSettings) {
   if (st.maxCount === 1) return SEARCH_BUDGET;
   const sec = searchSecondsOf(st);
@@ -728,6 +756,7 @@ function replaceSearch(old: SearchRun, target: number, decimals: number, range: 
 }
 
 function startSearch(id: string, request: SearchRequest) {
+  pendingMatches.delete(id); // anything the last version found and had not shown yet
   handles.set(id, getPool().run(request, ev => onSearchEvent(id, ev)));
 }
 
@@ -735,13 +764,36 @@ function patchRun(id: string, fn: (r: Run) => Partial<SearchRun> | Partial<Check
   set(s => ({ runs: s.runs.map(r => (r.id === id ? ({ ...r, ...fn(r) } as Run) : r)) }));
 }
 
+// A search can find thousands of matches in a second. Adding each one to the state on its own would
+// re-sort and re-draw the whole list that many times, so they arrive in batches a few times a second.
+const pendingMatches = new Map<string, Match[]>();
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+const FLUSH_MS = 120;
+
+function flushMatches() {
+  flushTimer = undefined;
+  if (!pendingMatches.size) return;
+  const batch = new Map(pendingMatches);
+  pendingMatches.clear();
+  set(s => ({
+    runs: s.runs.map(r => {
+      const add = batch.get(r.id);
+      return add && r.kind === 'search' ? { ...r, matches: [...r.matches, ...add] } : r;
+    }),
+  }));
+}
+
 function onSearchEvent(id: string, ev: EngineEvent) {
   if (ev.type === 'progress') {
     patchRun(id, () => ({ progress: ev.fraction, elapsedMs: ev.elapsedMs }));
   } else if (ev.type === 'match') {
-    patchRun(id, r => ({ matches: [...(r as SearchRun).matches, ev.match] }));
+    const list = pendingMatches.get(id);
+    if (list) list.push(ev.match);
+    else pendingMatches.set(id, [ev.match]);
+    flushTimer ??= setTimeout(flushMatches, FLUSH_MS);
   } else {
     handles.delete(id);
+    pendingMatches.delete(id); // 'done' carries every match, including any not added yet
     patchRun(id, r => ({
       status: 'done', reason: ev.reason, detail: ev.detail, matches: ev.matches, progress: 1, elapsedMs: performance.now() - r.startedAt,
     }));

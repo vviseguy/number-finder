@@ -114,10 +114,13 @@ export function parseQuery(text: string): Query {
 
     m = /^mode:(.+)$/i.exec(raw);
     if (m) {
-      const v = m[1].toLowerCase();
-      const g: Grouping | null = v.startsWith('clump') ? 'clumped' : v.startsWith('spread') ? 'spread' : v.startsWith('across') || v === 'files' ? 'across' : null;
+      const v = m[1].toLowerCase().replace(/[^a-z]/g, '');
+      const g: Grouping | null = v.startsWith('clump') ? 'clumped'
+        : v.startsWith('scatter') || v.startsWith('most') || v.startsWith('widest') ? 'scattered'
+          : v.startsWith('spread') ? 'spread'
+            : v.startsWith('across') || v === 'files' ? 'across' : null;
       if (g) q.grouping = g;
-      else q.errors.push(`"${raw}" should be mode:clumped, mode:spread, or mode:across.`);
+      else q.errors.push(`"${raw}" should be mode:clumped, mode:spread, mode:across, or mode:scattered.`);
       continue;
     }
 

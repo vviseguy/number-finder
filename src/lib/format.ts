@@ -122,6 +122,19 @@ export function locationShort(a: Amount): string {
   return `${l.sheet}!${l.cell}`;
 }
 
+/**
+ * Which one this is, when two numbers of the same value would otherwise read the same: a sheet cell tells
+ * them apart on its own ("Summary!B3"), a page does not, so a PDF number goes by its label ("1 Wages, tips…").
+ */
+export function whichOne(a: Amount, max = 22): string {
+  const label = a.label.trim();
+  if (a.location.kind !== 'pdf' || !label) return locationShort(a);
+  if (label.length <= max) return label;
+  const cut = label.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[,;:·]$/, '')}…`;
+}
+
 /** For headings: "Page 2 of 3", "Sheet Interest · cell D9", "Row 5" (CSV). */
 export function locationLong(a: Amount, pageCount?: number): string {
   const l = a.location;
